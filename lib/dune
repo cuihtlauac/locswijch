@@ -1,0 +1,3 @@
+(library
+ (name locswijch)
+ (libraries cmdliner opam-file-format unix))
