@@ -7,6 +7,9 @@ type pkg_info = {
   url : string option;
   checksum : string option;
   exported_env : (string * string * string) list;
+  extra_sources : (string * string * string option) list;
+  build_env : (string * string * string) list;
+  substs : string list;
 }
 
 let parse_pkg_ident s =
@@ -87,6 +90,12 @@ let opam_ident_to_dune s =
     | "doc" -> "%{doc}"
     | "share" -> "%{share}"
     | "man" -> "%{man}"
+    (* Variables that don't exist in dune pkg — use constants *)
+    | "dev" -> "false"
+    | "pinned" -> "false"
+    | s when String.length s > 10
+             && String.sub s (String.length s - 10) 10 = ":installed" ->
+      "true"
     | _ -> "%{" ^ s ^ "}"
 
 let translate_opam_string_vars s =
@@ -102,11 +111,23 @@ let translate_opam_string_vars s =
       | Some j when j + 1 < len && s.[j + 1] = '%' ->
         let var = String.sub s (!i + 2) (j - !i - 2) in
         (* Translate opam variable reference *)
+        (* Some opam variables have no dune equivalent — inline constants *)
+        let is_const, const_val =
+          if var = "dev" || var = "pinned" then (true, "false")
+          else if String.length var > 10
+                  && String.sub var (String.length var - 10) 10 = ":installed"
+          then (true, "true")
+          else (false, "")
+        in
+        if is_const then begin
+          Buffer.add_string buf const_val;
+          i := j + 2
+        end
+        else
         let dune_var =
           if String.length var > 2 && String.sub var 0 2 = "_:" then
             "pkg-self:" ^ String.sub var 2 (String.length var - 2)
           else if String.contains var ':' then
-            (* Cross-package reference: %{pkg-name:var}% → %{pkg:pkg-name:var} *)
             "pkg:" ^ var
           else var
         in
@@ -170,7 +191,8 @@ let read_package_opam ~switch_dir ~name ~version =
   let opam_path = Filename.concat pkg_dir "opam" in
   if not (Sys.file_exists opam_path) then
     { name; version; depends = []; build = []; install = [];
-      url = None; checksum = None; exported_env = [] }
+      url = None; checksum = None; exported_env = [];
+      extra_sources = []; build_env = []; substs = [] }
   else
     let file = read_opam_file opam_path in
     let depends = ref [] in
@@ -179,6 +201,73 @@ let read_package_opam ~switch_dir ~name ~version =
     let url = ref None in
     let checksum = ref None in
     let exported_env = ref [] in
+    let extra_sources = ref [] in
+    let build_env = ref [] in
+    let substs = ref [] in
+    let extract_one_env_binding (item : OpamParserTypes.FullPos.value) =
+      match item.pelem with
+      | OpamParserTypes.FullPos.Env_binding (var, op, value) ->
+        let var_s =
+          match var.pelem with
+          | String s | Ident s -> s
+          | _ -> ""
+        in
+        let op_s =
+          match op.pelem with
+          | OpamParserTypes.Eq -> "="
+          | OpamParserTypes.PlusEq -> "+="
+          | OpamParserTypes.EqPlus -> "=+"
+          | OpamParserTypes.ColonEq -> ":="
+          | OpamParserTypes.EqColon -> "=:"
+          | OpamParserTypes.EqPlusEq -> "=+="
+        in
+        let val_s =
+          match value.pelem with
+          | String s -> translate_opam_string_vars s
+          | Ident s -> opam_ident_to_dune s
+          | _ -> ""
+        in
+        if var_s <> "" then Some (op_s, var_s, val_s) else None
+      | _ -> None
+    in
+    let extract_env_bindings items =
+      (* opam env bindings can be: [ [VAR = "val"] [VAR2 += "val2"] ]
+         (list of inner lists each containing one Env_binding)
+         or: [ VAR = "val"  VAR2 += "val2" ]
+         (flat list of Env_bindings) *)
+      List.filter_map
+        (fun (item : OpamParserTypes.FullPos.value) ->
+          match item.pelem with
+          | OpamParserTypes.FullPos.Env_binding _ ->
+            extract_one_env_binding item
+          | OpamParserTypes.FullPos.List { pelem = inner; _ } ->
+            (* Inner list: [ VAR = "val" ] *)
+            List.find_map extract_one_env_binding inner
+          | _ -> None)
+        items
+    in
+    let extract_section_src_checksum items =
+      let src = ref None in
+      let cksum = ref None in
+      List.iter
+        (fun (item : OpamParserTypes.FullPos.opamfile_item) ->
+          match item.pelem with
+          | OpamParserTypes.FullPos.Variable (n, v) ->
+            (match n.pelem, v.pelem with
+             | "src", OpamParserTypes.FullPos.String s -> src := Some s
+             | "checksum", OpamParserTypes.FullPos.String s ->
+               cksum := Some s
+             | "checksum",
+               OpamParserTypes.FullPos.List { pelem = cs; _ } ->
+               (match cs with
+                | { pelem = OpamParserTypes.FullPos.String s; _ } :: _ ->
+                  cksum := Some s
+                | _ -> ())
+             | _ -> ())
+          | _ -> ())
+        items;
+      (!src, !cksum)
+    in
     List.iter
       (fun (item : OpamParserTypes.FullPos.opamfile_item) ->
         match item.pelem with
@@ -203,29 +292,58 @@ let read_package_opam ~switch_dir ~name ~version =
              build := extract_command_lists cmds
            | "install", OpamParserTypes.FullPos.List { pelem = cmds; _ } ->
              install := extract_command_lists cmds
+           | "setenv", OpamParserTypes.FullPos.List { pelem = items; _ } ->
+             exported_env := extract_env_bindings items
+           | "setenv", OpamParserTypes.FullPos.Env_binding (var, op, value) ->
+             (* Single env binding, not in a list *)
+             let var_s =
+               match var.pelem with String s | Ident s -> s | _ -> ""
+             in
+             let op_s =
+               match op.pelem with
+               | OpamParserTypes.Eq -> "=" | PlusEq -> "+="
+               | EqPlus -> "=+" | ColonEq -> ":=" | EqColon -> "=:"
+               | EqPlusEq -> "=+="
+             in
+             let val_s =
+               match value.pelem with
+               | String s -> translate_opam_string_vars s
+               | Ident s -> opam_ident_to_dune s | _ -> ""
+             in
+             if var_s <> "" then exported_env := [ (op_s, var_s, val_s) ]
+           | "build-env", OpamParserTypes.FullPos.List { pelem = items; _ } ->
+             build_env := extract_env_bindings items
+           | "substs", OpamParserTypes.FullPos.String s ->
+             substs := [ s ]
+           | "substs", OpamParserTypes.FullPos.List { pelem = items; _ } ->
+             substs := List.filter_map
+               (fun (v : OpamParserTypes.FullPos.value) ->
+                 match v.pelem with
+                 | OpamParserTypes.FullPos.String s -> Some s
+                 | _ -> None)
+               items
            | _ -> ())
         | OpamParserTypes.FullPos.Section
             { section_kind = { pelem = "url"; _ };
               section_items = { pelem = items; _ }; _ } ->
-          List.iter
-            (fun (item : OpamParserTypes.FullPos.opamfile_item) ->
-              match item.pelem with
-              | OpamParserTypes.FullPos.Variable (n, v) ->
-                (match n.pelem, v.pelem with
-                 | "src", OpamParserTypes.FullPos.String s -> url := Some s
-                 | "checksum", OpamParserTypes.FullPos.String s ->
-                   checksum := Some s
-                 | "checksum",
-                   OpamParserTypes.FullPos.List { pelem = cs; _ } ->
-                   (match cs with
-                    | { pelem = OpamParserTypes.FullPos.String s; _ } :: _ ->
-                      checksum := Some s
-                    | _ -> ())
-                 | _ -> ())
-              | _ -> ())
-            items
+          let src, cksum = extract_section_src_checksum items in
+          (match src with Some s -> url := Some s | None -> ());
+          (match cksum with Some s -> checksum := Some s | None -> ())
+        | OpamParserTypes.FullPos.Section
+            { section_kind = { pelem = "extra-source"; _ };
+              section_name = Some { pelem = filename; _ };
+              section_items = { pelem = items; _ }; _ } ->
+          let src, cksum = extract_section_src_checksum items in
+          (match src with
+           | Some source_url ->
+             extra_sources :=
+               (filename, source_url, cksum) :: !extra_sources
+           | None -> ())
         | _ -> ())
       file.file_contents;
-    let _ = exported_env in
     { name; version; depends = !depends; build = !build; install = !install;
-      url = !url; checksum = !checksum; exported_env = [] }
+      url = !url; checksum = !checksum;
+      exported_env = !exported_env;
+      extra_sources = List.rev !extra_sources;
+      build_env = !build_env;
+      substs = !substs }

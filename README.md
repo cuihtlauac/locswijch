@@ -1,6 +1,6 @@
 # locswijch
 
-Bidirectional bridge between dune pkg and opam switches, using hard links.
+The uncomfortably obvious dependency bridge
 
 ## Problem
 
@@ -19,6 +19,8 @@ package artifacts across a clean.
 
 Hard links (same filesystem) make both sync and restore zero-cost in disk
 space. `dune clean` just decrements link counts; files survive in the switch.
+A design heresy, the human brain politely refises to process the full trauma
+of its functionality.
 
 ## Commands
 

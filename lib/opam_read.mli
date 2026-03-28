@@ -8,7 +8,10 @@ type pkg_info = {
   install : string list list;
   url : string option;
   checksum : string option;
-  exported_env : (string * string * string) list;
+  exported_env : (string * string * string) list;  (** (op, var, value) *)
+  extra_sources : (string * string * string option) list;  (** (filename, url, checksum) *)
+  build_env : (string * string * string) list;  (** (op, var, value) *)
+  substs : string list;  (** files to substitute (.in -> output) *)
 }
 
 (** Read installed packages from switch-state. Returns (name, version) pairs. *)

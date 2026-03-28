@@ -19,12 +19,43 @@ let write_pkg_file ~lock_dir ~installed_names (info : Opam_read.pkg_info) =
   let path = Filename.concat lock_dir filename in
   let buf = Buffer.create 512 in
   Printf.bprintf buf "(version %s)\n" info.version;
-  (* build: (build <action>) — direct action, no wrapper *)
-  (match info.build with
-   | [] -> ()
-   | cmds ->
+  (* build: (build <action>) — optionally wrapped in (withenv ...) *)
+  (* If substs are present and no build command, generate substitute actions *)
+  let build_cmds =
+    match info.build, info.substs with
+    | [], _ :: _ ->
+      (* No build but has substs — generate substitute actions as build *)
+      None (* handled specially below *)
+    | cmds, _ -> Some cmds
+  in
+  let subst_action =
+    match info.substs with
+    | [] -> None
+    | [ s ] -> Some (Printf.sprintf "(substitute %s.in %s)" s s)
+    | substs ->
+      let steps = List.map
+          (fun s -> Printf.sprintf "(substitute %s.in %s)" s s) substs in
+      Some (Printf.sprintf "(progn\n   %s)" (String.concat "\n   " steps))
+  in
+  (match build_cmds, subst_action with
+   | Some [], None -> ()
+   | Some [], Some subst ->
+     Printf.bprintf buf "\n(build\n %s)\n" subst
+   | None, Some subst ->
+     Printf.bprintf buf "\n(build\n %s)\n" subst
+   | Some cmds, _ when cmds <> [] ->
      let action = sexp_of_action cmds in
-     Printf.bprintf buf "\n(build\n %s)\n" action);
+     (match info.build_env with
+      | [] ->
+        Printf.bprintf buf "\n(build\n %s)\n" action
+      | envs ->
+        Buffer.add_string buf "\n(build\n (withenv\n  (";
+        List.iter
+          (fun (op, var, value) ->
+            Printf.bprintf buf "(%s %s %s)\n   " op var value)
+          envs;
+        Printf.bprintf buf ")\n  %s))\n" action)
+   | _ -> ());
   (* install: (install <action>) *)
   (match info.install with
    | [] -> ()
@@ -46,6 +77,31 @@ let write_pkg_file ~lock_dir ~installed_names (info : Opam_read.pkg_info) =
       | Some c -> Printf.bprintf buf "  (checksum %s)\n" c
       | None -> ());
      Buffer.add_string buf " ))\n");
+  (* exported_env *)
+  (match info.exported_env with
+   | [] -> ()
+   | envs ->
+     Buffer.add_string buf "\n(exported_env\n";
+     List.iter
+       (fun (op, var, value) ->
+         Printf.bprintf buf " (%s %s \"%s\")\n" op var value)
+       envs;
+     Buffer.add_string buf ")\n");
+  (* extra_sources *)
+  (match info.extra_sources with
+   | [] -> ()
+   | srcs ->
+     Buffer.add_string buf "\n(extra_sources\n";
+     List.iter
+       (fun (filename, source_url, cksum) ->
+         Printf.bprintf buf " (%s\n  (fetch\n" filename;
+         Printf.bprintf buf "   (url\n    %s)\n" source_url;
+         (match cksum with
+          | Some c -> Printf.bprintf buf "   (checksum\n    %s)\n" c
+          | None -> ());
+         Buffer.add_string buf "  ))\n")
+       srcs;
+     Buffer.add_string buf ")\n");
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
       output_string oc (Buffer.contents buf))
