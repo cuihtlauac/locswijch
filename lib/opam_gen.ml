@@ -101,6 +101,13 @@ let write_package_opam config pkg =
       [ ".opam-switch"; "packages"; pkg_ident pkg ]
   in
   let path = Filename.concat pkg_dir "opam" in
+  (* Never overwrite existing metadata: on a real opam switch it is the
+     authoritative package definition, which migrate reads back
+     (build/install commands, depopts, extra-sources). Replacing it with
+     the stub below breaks any later migrate from this switch. The stub is
+     only for packages the switch does not know about yet. *)
+  if Sys.file_exists path then ()
+  else begin
   let buf = Buffer.create 512 in
   Printf.bprintf buf "opam-version: \"2.0\"\n";
   Printf.bprintf buf "name: \"%s\"\n" pkg.name;
@@ -144,6 +151,7 @@ let write_package_opam config pkg =
      Printf.bprintf buf "}\n"
    | None -> ());
   write_file path (Buffer.contents buf)
+  end
 
 let write_environment config pkgs =
   let path =
