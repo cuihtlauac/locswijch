@@ -9,7 +9,45 @@ let sexp_of_action cmds =
     let steps = List.map sexp_of_command cmds in
     Printf.sprintf "(progn\n   %s)" (String.concat "\n   " steps)
 
+(* Vanilla opam builds of some packages bake absolute build-time paths into
+   installed files. Under opam this is harmless (the build prefix is the
+   final prefix), but dune pkg runs builds in a copy sandbox that is deleted
+   afterwards, leaving dead paths behind. Dune's own lock flow avoids this
+   via patched packages in opam-overlays; migrate generates from vanilla
+   switch metadata, so patch equivalently here. *)
+let apply_overrides (info : Opam_read.pkg_info) =
+  match info.name with
+  | "ocamlfind" ->
+    (* configure bakes the (sandbox) build prefix into findlib.conf,
+       topfind, Makefile.config and findlib_config.ml, and into the
+       ocamlfind binary's compiled-in conf path. The opam-overlays patch
+       solves this with -with-relative-paths-at: paths are stored relative
+       to the prefix and resolved at runtime from the binary's location.
+       Unlike the overlay we keep topfind (topkg-built packages need it)
+       and strip any remaining sandbox component from the installed text
+       files as a safety net. *)
+    let build =
+      List.map
+        (fun cmd ->
+          match cmd with
+          | "./configure" :: _ ->
+            cmd @ [ "-with-relative-paths-at"; "%{prefix}" ]
+          | _ -> cmd)
+        info.build
+    in
+    let sed_fix =
+      [ "sh"; "-c";
+        "\"for f in %{lib}/findlib.conf %{lib}/toplevel/topfind \
+         %{lib}/findlib/topfind %{lib}/findlib/Makefile.config \
+         %{lib}/findlib/findlib_config.ml; do \
+         test -f $f && sed -i -e 's#/[.]sandbox/[0-9a-f]*##g' $f; \
+         done; true\"" ]
+    in
+    { info with build; install = info.install @ [ sed_fix ] }
+  | _ -> info
+
 let write_pkg_file ~lock_dir ~installed_names (info : Opam_read.pkg_info) =
+  let info = apply_overrides info in
   let info = { info with
     depends = List.filter
       (fun d -> List.mem d installed_names) info.depends }
@@ -152,7 +190,8 @@ let run switch_name project_root =
   List.iter
     (fun (name, version) ->
       let info =
-        Opam_read.read_package_opam ~switch_dir:config.switch_dir ~name ~version
+        Opam_read.read_package_opam ~switch_dir:config.switch_dir
+          ~installed_names ~name ~version
       in
       write_pkg_file ~lock_dir:config.lock_dir ~installed_names info;
       incr count)
