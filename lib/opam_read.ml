@@ -12,6 +12,18 @@ type pkg_info = {
   substs : string list;
 }
 
+(* Predicate for %{pkg:installed}% translation. Set by read_package_opam
+   from the caller-supplied installed set; the translators below are shared
+   string helpers with no room to thread it through. *)
+let is_installed : (string -> bool) ref = ref (fun _ -> true)
+
+(* "a+b:installed" means all of a and b are installed. *)
+let resolve_installed_var var =
+  let pkgs =
+    String.sub var 0 (String.length var - 10) |> String.split_on_char '+'
+  in
+  if List.for_all !is_installed pkgs then "true" else "false"
+
 let parse_pkg_ident s =
   (* "name.version" *)
   match String.index_opt s '.' with
@@ -95,7 +107,7 @@ let opam_ident_to_dune s =
     | "pinned" -> "false"
     | s when String.length s > 10
              && String.sub s (String.length s - 10) 10 = ":installed" ->
-      "true"
+      resolve_installed_var s
     | _ -> "%{" ^ s ^ "}"
 
 let translate_opam_string_vars s =
@@ -116,7 +128,7 @@ let translate_opam_string_vars s =
           if var = "dev" || var = "pinned" then (true, "false")
           else if String.length var > 10
                   && String.sub var (String.length var - 10) 10 = ":installed"
-          then (true, "true")
+          then (true, resolve_installed_var var)
           else (false, "")
         in
         if is_const then begin
@@ -154,12 +166,46 @@ let extract_value (v : OpamParserTypes.FullPos.value) =
 
 let extract_string_list items = List.filter_map extract_value items
 
+(* A dependency entry may be a disjunction of alternatives
+   (e.g. ocaml-base-compiler | ocaml-variants | ocaml-system).
+   Collect every alternative; migrate later filters to the packages
+   actually installed in the switch. Dependencies marked {post} are
+   excluded from install ordering by opam precisely to break cycles
+   (ocaml-base-compiler <-> ocaml), so drop them here too. *)
+let rec contains_post (f : OpamParserTypes.FullPos.value) =
+  match f.pelem with
+  | OpamParserTypes.FullPos.Ident "post" -> true
+  | OpamParserTypes.FullPos.Logop (_, a, b) ->
+    contains_post a || contains_post b
+  | OpamParserTypes.FullPos.Pfxop (_, v) -> contains_post v
+  | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
+    List.exists contains_post vs
+  | _ -> false
+
+let rec dep_names (d : OpamParserTypes.FullPos.value) =
+  match d.pelem with
+  | OpamParserTypes.FullPos.String s -> [ s ]
+  | OpamParserTypes.FullPos.Ident s -> [ s ]
+  | OpamParserTypes.FullPos.Option (v, { pelem = filters; _ }) ->
+    if List.exists contains_post filters then []
+    else dep_names v
+  | OpamParserTypes.FullPos.Logop (_, a, b) ->
+    dep_names a @ dep_names b
+  | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
+    List.concat_map dep_names vs
+  | _ -> []
+
 let is_single_command items =
-  (* If all items are strings/idents (not sublists), it's a single command *)
+  (* If no item is a sublist, it's a single command written as a flat list
+     of atoms. Atoms may carry filters, e.g. "@runtest" {with-test} in
+     ocplib-endian; extract_string_list drops those filtered atoms, which
+     matches opam's evaluation with test/doc disabled. *)
   List.for_all
     (fun (item : OpamParserTypes.FullPos.value) ->
       match item.pelem with
       | OpamParserTypes.FullPos.String _ | OpamParserTypes.FullPos.Ident _ -> true
+      | OpamParserTypes.FullPos.Option
+          ({ pelem = String _ | Ident _; _ }, _) -> true
       | _ -> false)
     items
 
@@ -183,7 +229,8 @@ let extract_command_lists items =
         | _ -> None)
       items
 
-let read_package_opam ~switch_dir ~name ~version =
+let read_package_opam ~switch_dir ~installed_names ~name ~version =
+  is_installed := (fun p -> List.mem p installed_names);
   let pkg_dir =
     List.fold_left Filename.concat switch_dir
       [ ".opam-switch"; "packages"; name ^ "." ^ version ]
@@ -196,6 +243,7 @@ let read_package_opam ~switch_dir ~name ~version =
   else
     let file = read_opam_file opam_path in
     let depends = ref [] in
+    let depopts = ref [] in
     let build = ref [] in
     let install = ref [] in
     let url = ref None in
@@ -274,37 +322,14 @@ let read_package_opam ~switch_dir ~name ~version =
         | OpamParserTypes.FullPos.Variable (name_node, value) ->
           (match name_node.pelem, value.pelem with
            | "depends", OpamParserTypes.FullPos.List { pelem = deps; _ } ->
-             (* A dependency entry may be a disjunction of alternatives
-                (e.g. ocaml-base-compiler | ocaml-variants | ocaml-system).
-                Collect every alternative; migrate later filters to the
-                packages actually installed in the switch. Dependencies
-                marked {post} are excluded from install ordering by opam
-                precisely to break cycles (ocaml-base-compiler <-> ocaml),
-                so drop them here too. *)
-             let rec contains_post (f : OpamParserTypes.FullPos.value) =
-               match f.pelem with
-               | OpamParserTypes.FullPos.Ident "post" -> true
-               | OpamParserTypes.FullPos.Logop (_, a, b) ->
-                 contains_post a || contains_post b
-               | OpamParserTypes.FullPos.Pfxop (_, v) -> contains_post v
-               | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
-                 List.exists contains_post vs
-               | _ -> false
-             in
-             let rec dep_names (d : OpamParserTypes.FullPos.value) =
-               match d.pelem with
-               | OpamParserTypes.FullPos.String s -> [ s ]
-               | OpamParserTypes.FullPos.Ident s -> [ s ]
-               | OpamParserTypes.FullPos.Option (v, { pelem = filters; _ }) ->
-                 if List.exists contains_post filters then []
-                 else dep_names v
-               | OpamParserTypes.FullPos.Logop (_, a, b) ->
-                 dep_names a @ dep_names b
-               | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
-                 List.concat_map dep_names vs
-               | _ -> []
-             in
              depends := List.concat_map dep_names deps
+           | "depopts", OpamParserTypes.FullPos.List { pelem = deps; _ } ->
+             (* Optional dependencies. Active ones (i.e. installed in the
+                switch) must appear in the lock file's depends so dune
+                builds them first and exposes them to this package's
+                build; migrate's installed filter drops the inactive
+                ones. *)
+             depopts := List.concat_map dep_names deps
            | "build", OpamParserTypes.FullPos.List { pelem = cmds; _ } ->
              build := extract_command_lists cmds
            | "install", OpamParserTypes.FullPos.List { pelem = cmds; _ } ->
@@ -358,7 +383,8 @@ let read_package_opam ~switch_dir ~name ~version =
            | None -> ())
         | _ -> ())
       file.file_contents;
-    { name; version; depends = !depends; build = !build; install = !install;
+    { name; version; depends = !depends @ !depopts;
+      build = !build; install = !install;
       url = !url; checksum = !checksum;
       exported_env = !exported_env;
       extra_sources = List.rev !extra_sources;

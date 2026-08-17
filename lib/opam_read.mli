@@ -17,8 +17,12 @@ type pkg_info = {
 (** Read installed packages from switch-state. Returns (name, version) pairs. *)
 val read_installed : switch_dir:string -> (string * string) list
 
-(** Read a package's opam file from .opam-switch/packages/. *)
-val read_package_opam : switch_dir:string -> name:string -> version:string -> pkg_info
+(** Read a package's opam file from .opam-switch/packages/.
+    [installed_names] is the switch's installed set, used to resolve
+    %{pkg:installed}% variables. *)
+val read_package_opam :
+  switch_dir:string -> installed_names:string list ->
+  name:string -> version:string -> pkg_info
 
 (** Read the compiler package names from switch-state. *)
 val read_compiler_pkgs : switch_dir:string -> (string * string) list
