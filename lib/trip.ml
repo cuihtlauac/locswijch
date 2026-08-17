@@ -34,10 +34,13 @@ let run switch_name project_root =
   let lock_file_count = count_entries config.lock_dir in
   Printf.printf "  lock files: %d\n" lock_file_count;
 
-  (* Step 2: dune build *)
+  (* Step 2: dune build. @install rather than @all: the host project's
+     test/benchmark directories may need libraries outside the migrated
+     closure, while the lock-dir base environment forces every locked
+     package to build either way. *)
   step "dune build (full, from dune pkg)" (fun () ->
       let t = time_command
-          (Printf.sprintf "cd %s && opam exec -- dune build @all"
+          (Printf.sprintf "cd %s && opam exec -- dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t);
@@ -89,7 +92,7 @@ let run switch_name project_root =
   (* Step 6: dune build (should be instant) *)
   step "dune build (after restore, should skip package rebuilds)" (fun () ->
       let t = time_command
-          (Printf.sprintf "cd %s && opam exec -- dune build @all"
+          (Printf.sprintf "cd %s && opam exec -- dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t);
