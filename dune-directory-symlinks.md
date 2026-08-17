@@ -9,8 +9,19 @@ such as `ocamlbuild` (whose source tarball contains a symlink to a directory)
 and the relocatable compiler (whose installation layout includes symlinks).
 
 **Tracked as:** [ocaml/dune#9873](https://github.com/ocaml/dune/issues/9873)
-(open, assigned to Ambre Austen Suhamy, milestone: "[pkg]: Minimal Stable
-Product")
+(**closed 2026-05**, was assigned to Ambre Austen Suhamy)
+
+**Resolution (update 2026-08-17):** the package-source cases (2, 3, 4) were
+fixed upstream by PR [#13792](https://github.com/ocaml/dune/pull/13792)
+("[pkg] Resolve directory symlinks in fetched targets", merged 2026-05-06),
+released in **dune 3.24.0** (2026-06-21). It implements Option A below:
+after fetching package sources, directory symlinks are resolved into real
+directories (file symlinks are left as-is, broken symlinks silently removed).
+Verified locally on 2026-08-17 with both the minimal Case-3 repro and the
+real `ocamlbuild-0.16.1` tarball: fail on dune 3.23.1, succeed on 3.24.2.
+The rule-produced directory-target case (Case 1) remains unfixed and is now
+tracked as [#9874](https://github.com/ocaml/dune/issues/9874); it does not
+affect locswijch. See "Current State" below.
 
 ## How to Reproduce
 
@@ -203,13 +214,33 @@ hardlinks creates implicit dependencies on external content.
 added (Ali Caglayan), documenting all three source-related failure modes
 with `CR-someday` comments.
 
+**2026-05-06** — PR [#13792](https://github.com/ocaml/dune/pull/13792)
+merged: "[pkg] Resolve directory symlinks in fetched targets". After fetching
+package sources, a pass resolves directory symlinks into real directories.
+File symlinks are left as-is; broken symlinks are removed silently. This is
+Option A below.
+
+**2026-05-07** — Issue #9873 **closed**. The remaining unfixed part —
+directory symlinks in rule-produced directory targets (Case 1) — is tracked
+in [#9874](https://github.com/ocaml/dune/issues/9874). Maintainers note that
+practical occurrences can also be patched in dune's pkg overlays, as was done
+for ocamlbuild.
+
+**2026-06-21** — dune **3.24.0** released, carrying the fix.
+
 ## Current State
 
-- The issue is **open** and on the "[pkg]: Minimal Stable Product" milestone.
-- Three separate test files document the expected failures.
-- File symlinks are handled (converted to hardlinks during install).
-- Directory symlinks are **not handled** in any code path.
-- The `CR-someday` comments suggest this is acknowledged but deprioritized.
+*(updated 2026-08-17)*
+
+- The package-source cases (2, 3, 4) are **fixed** in dune >= 3.24.0
+  (PR #13792). Verified locally against dune 3.24.2 with the minimal repro
+  and the real `ocamlbuild-0.16.1` tarball; both still fail on 3.23.1.
+- Case 1 (rule-produced directory targets) remains **open** as #9874.
+- Case 5 (install targets): file symlinks are converted to hardlinks during
+  install (PR #13239); directory symlinks in install targets are silently
+  ignored.
+- The shared-cache interaction (#11523) is unaffected by #13792 (status not
+  re-checked).
 
 ## Fix Design Options
 
@@ -297,6 +328,9 @@ but strip/resolve them before storing in the shared cache.
 **Cons:** Two different behaviors depending on cache mode. Complexity.
 
 ## Recommendation
+
+*(This is what upstream ended up doing: PR #13792 implements Option A for
+fetched sources.)*
 
 **Option A** for immediate pragmatic fix — resolve directory symlinks after
 tarball extraction. This unblocks `ocamlbuild` and similar packages with
