@@ -4,9 +4,10 @@ The uncomfortably obvious dependency bridge
 
 ## Problem
 
-`dune pkg` stores built packages in `_build/`. Running `dune clean` destroys
-them all, requiring a full rebuild from scratch. There is no way to preserve
-package artifacts across a clean.
+`dune pkg` stores built packages in `_build/`, invisible to the standard
+opam switch mechanism that tools like ocamllsp, merlin, and utop rely on.
+And `dune.lock/` plus the built artifacts live only in the project tree —
+there is no switch-level record to recover them from.
 
 ## Solution
 
@@ -14,13 +15,25 @@ package artifacts across a clean.
 
 1. **Working opam switch** — tools like ocamllsp, merlin, and utop can find
    packages via the standard opam switch mechanism.
-2. **Backup of `_build/.pkg/`** — survives `dune clean` and can restore
-   package artifacts instantly.
+2. **Backup of `dune.lock/` and `_build/.pkg/`** — survives `dune clean`
+   (and even deletion of `dune.lock/`) and can reconstruct both from switch
+   metadata.
 
 Hard links (same filesystem) make both sync and restore zero-cost in disk
 space. `dune clean` just decrements link counts; files survive in the switch.
 A design heresy, the human brain politely refises to process the full trauma
 of its functionality.
+
+### Note: instant rebuilds are dune's job, not locswijch's
+
+Dune decides whether to re-run a rule from `_build/.db`, which `dune clean`
+deletes — restored target trees alone are never trusted, so a rebuild after
+`restore` re-executes every package rule. The fix is dune's own shared
+cache: run builds with `DUNE_CACHE=enabled`. The default cache mode
+(`enabled-except-user-rules`) excludes lock-dir package actions; with
+`DUNE_CACHE=enabled` a post-clean rebuild hard-links everything back from
+`~/.cache/dune/db` in about a second. Use `restore` to recover the
+`dune.lock/` + `_build/.pkg/` state itself; use the dune cache for speed.
 
 ## Commands
 
@@ -37,9 +50,11 @@ locswijch sync [--switch NAME] [--project DIR]
 
 ### `locswijch restore`
 
-Run after `dune clean`. Recreates `_build/_private/default/.pkg/` from the
-switch via hard-links. The next `dune build` sees populated targets with valid
-cookies and skips rebuilding.
+Run after `dune clean` (or after losing `dune.lock/`). Recreates
+`dune.lock/` and `_build/_private/default/.pkg/` from the switch via
+hard-links. Note that the next `dune build` does not trust the restored
+targets by themselves (see above) — pair with `DUNE_CACHE=enabled` for
+fast rebuilds.
 
 ```
 locswijch restore [--switch NAME] [--project DIR]
@@ -62,6 +77,8 @@ locswijch migrate [--switch NAME] [--project DIR]
 ### New project using dune pkg
 
 ```sh
+export DUNE_CACHE=enabled   # let dune cache package builds too
+
 # Initial setup
 dune pkg lock
 dune build
@@ -69,8 +86,8 @@ locswijch sync
 
 # After dune clean
 dune clean
-locswijch restore
-dune build              # instant — no package rebuild
+locswijch restore       # recover dune.lock/ + _build/.pkg/
+dune build              # ~1s — packages hard-linked from the dune cache
 ```
 
 ### Migrating from opam to dune pkg
@@ -132,12 +149,14 @@ dune build
 
 ## Limitations
 
+- **Restore does not make rebuilds instant**: dune re-executes any rule
+  absent from `_build/.db` (deleted by `dune clean`) regardless of the
+  restored targets. Use `DUNE_CACHE=enabled` for that; `restore` recovers
+  state, not build time.
 - **Cookie format coupling**: dune's binary cookie format may change across
   versions. If it does, stored cookies become invalid and a full rebuild is
   needed (graceful degradation).
 - **No incremental sync**: every `sync` is a full re-sync. This is fast
   (hard-links are O(1) per file) but removes stale files from the switch.
-- **dune.lock must survive**: `restore` requires `dune.lock/` to exist (it is
-  not in `_build/`, so `dune clean` does not touch it).
 - **migrate is approximate**: the opam-to-dune translation covers common
   patterns but may not handle all opam build instructions perfectly.

@@ -17,6 +17,11 @@ No test suite yet. Manual testing:
 opam exec -- dune exec ./bin/main.exe -- sync --project /path/to/project
 opam exec -- dune exec ./bin/main.exe -- restore --project /path/to/project
 opam exec -- dune exec ./bin/main.exe -- migrate --switch default --project /path/to/project
+
+# End-to-end round trip: migrate, build, sync, clean+rm dune.lock, restore,
+# rebuild. Destroys the target project's _build/ and dune.lock/ and overwrites
+# the switch. Reference setup: --switch lts --project ~/caml/ocaml-re
+opam exec -- dune exec ./bin/main.exe -- trip --switch lts --project /path/to/project
 ```
 
 ## Architecture

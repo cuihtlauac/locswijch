@@ -37,10 +37,16 @@ let run switch_name project_root =
   (* Step 2: dune build. @install rather than @all: the host project's
      test/benchmark directories may need libraries outside the migrated
      closure, while the lock-dir base environment forces every locked
-     package to build either way. *)
+     package to build either way. DUNE_CACHE=enabled: lock-dir package
+     actions count as user rules, which the default cache mode
+     (enabled-except-user-rules) excludes; without this, step 6 cannot
+     skip package rebuilds (dune re-executes any rule absent from
+     _build/.db, which dune clean deletes, regardless of restored
+     targets). *)
   step "dune build (full, from dune pkg)" (fun () ->
       let t = time_command
-          (Printf.sprintf "cd %s && opam exec -- dune build @install"
+          (Printf.sprintf
+             "cd %s && DUNE_CACHE=enabled opam exec -- dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t);
@@ -89,10 +95,11 @@ let run switch_name project_root =
     exit 1
   end;
 
-  (* Step 6: dune build (should be instant) *)
+  (* Step 6: dune build (should be near-instant via the shared cache) *)
   step "dune build (after restore, should skip package rebuilds)" (fun () ->
       let t = time_command
-          (Printf.sprintf "cd %s && opam exec -- dune build @install"
+          (Printf.sprintf
+             "cd %s && DUNE_CACHE=enabled opam exec -- dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t);
