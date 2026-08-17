@@ -274,20 +274,37 @@ let read_package_opam ~switch_dir ~name ~version =
         | OpamParserTypes.FullPos.Variable (name_node, value) ->
           (match name_node.pelem, value.pelem with
            | "depends", OpamParserTypes.FullPos.List { pelem = deps; _ } ->
-             depends :=
-               List.filter_map
-                 (fun (d : OpamParserTypes.FullPos.value) ->
-                   match d.pelem with
-                   | OpamParserTypes.FullPos.String s -> Some s
-                   | OpamParserTypes.FullPos.Ident s -> Some s
-                   | OpamParserTypes.FullPos.Option
-                       ({ pelem = String s; _ }, _) ->
-                     Some s
-                   | OpamParserTypes.FullPos.Option
-                       ({ pelem = Ident s; _ }, _) ->
-                     Some s
-                   | _ -> None)
-                 deps
+             (* A dependency entry may be a disjunction of alternatives
+                (e.g. ocaml-base-compiler | ocaml-variants | ocaml-system).
+                Collect every alternative; migrate later filters to the
+                packages actually installed in the switch. Dependencies
+                marked {post} are excluded from install ordering by opam
+                precisely to break cycles (ocaml-base-compiler <-> ocaml),
+                so drop them here too. *)
+             let rec contains_post (f : OpamParserTypes.FullPos.value) =
+               match f.pelem with
+               | OpamParserTypes.FullPos.Ident "post" -> true
+               | OpamParserTypes.FullPos.Logop (_, a, b) ->
+                 contains_post a || contains_post b
+               | OpamParserTypes.FullPos.Pfxop (_, v) -> contains_post v
+               | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
+                 List.exists contains_post vs
+               | _ -> false
+             in
+             let rec dep_names (d : OpamParserTypes.FullPos.value) =
+               match d.pelem with
+               | OpamParserTypes.FullPos.String s -> [ s ]
+               | OpamParserTypes.FullPos.Ident s -> [ s ]
+               | OpamParserTypes.FullPos.Option (v, { pelem = filters; _ }) ->
+                 if List.exists contains_post filters then []
+                 else dep_names v
+               | OpamParserTypes.FullPos.Logop (_, a, b) ->
+                 dep_names a @ dep_names b
+               | OpamParserTypes.FullPos.Group { pelem = vs; _ } ->
+                 List.concat_map dep_names vs
+               | _ -> []
+             in
+             depends := List.concat_map dep_names deps
            | "build", OpamParserTypes.FullPos.List { pelem = cmds; _ } ->
              build := extract_command_lists cmds
            | "install", OpamParserTypes.FullPos.List { pelem = cmds; _ } ->
