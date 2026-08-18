@@ -10,7 +10,19 @@ opam exec -- dune build @all
 
 ## Test
 
-No test suite yet. Manual testing:
+```sh
+opam exec -- dune runtest
+```
+
+Two suites: `test/unit/` (sexp_parser + opam_read parsing, incl. the
+disjunction/{post}/depopts/flat-command/%{pkg:installed}% fixes) and
+`test/smoke/` (full trip cycle against a generated two-package fixture
+closure in a temp dir — no compiler in the lock, so it uses the ambient
+toolchain; hermetic dune cache via XDG_CACHE_HOME; the post-restore
+rebuild must beat a threshold a real package rebuild cannot meet). The
+smoke test needs `opam` and `dune` on PATH.
+
+Manual testing against a real switch:
 
 ```sh
 # Requires a project with dune.lock/ and built packages in _build/.pkg/
@@ -43,6 +55,8 @@ lib/sync.ml          Sync command: _build/.pkg/ -> opam switch
 lib/restore.ml       Restore command: opam switch -> _build/.pkg/
 lib/migrate.ml       Migrate command: opam switch -> dune.lock/
 lib/trip.ml          Trip command: end-to-end round-trip test
+test/unit/           Parser unit tests (sexp_parser, opam_read)
+test/smoke/          End-to-end trip against a generated fixture closure
 ```
 
 ## Key design decisions

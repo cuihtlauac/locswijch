@@ -3,6 +3,21 @@
 Completed backlog items, most recent first. See backlog.md for pending
 work.
 
+## Scripted smoke test and parser unit tests (2026-08-18)
+
+`dune runtest` now covers the tool. test/unit/ pins the five parser
+fixes through the public read_package_opam API (disjunctions, {post},
+depopts, flat filtered commands, %{pkg:installed}%) plus sexp_parser.
+test/smoke/ generates a two-package fixture closure (file:// directory
+sources, no compiler — dune falls back to the ambient toolchain) and
+runs the full trip cycle in a temp dir; trip gained `--threshold` and
+the fixture's sleep-5 build makes it discriminating: post-restore must
+skip package rebuilds (0.1s) to pass. Two findings: locked packages only
+build when rules consume them unless the toolchain itself comes from the
+lock (fixture packages install tools that project rules run), and the
+dune cache's default hardlink storage fails silently across devices
+(smoke is hermetic via XDG_CACHE_HOME; warning idea backlogged).
+
 ## Prune stale package digest dirs in sync (2026-08-18)
 
 Digest dirs accumulated across migrate iterations (81 for 32 live

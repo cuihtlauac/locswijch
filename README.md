@@ -152,6 +152,19 @@ opam install cmdliner opam-file-format
 dune build
 ```
 
+## Testing
+
+```sh
+dune runtest
+```
+
+Runs parser unit tests plus a self-contained end-to-end smoke test: a
+tiny two-package fixture closure (generated in a temp dir, no compiler,
+local sources) goes through the full migrate → build → sync → clean →
+restore → rebuild cycle, and the post-restore rebuild must beat a time
+threshold that a real package rebuild cannot meet. Requires `opam` and
+`dune` on `PATH`.
+
 ## Limitations
 
 - **Restore does not make rebuilds instant**: dune re-executes any rule

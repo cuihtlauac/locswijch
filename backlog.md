@@ -3,16 +3,6 @@
 Pending work items, one per heading, roughly in priority order. The first
 item is the current task. See changelog.md for completed items.
 
-## Scripted smoke test
-
-CLAUDE.md says "no test suite yet"; the only end-to-end check is the
-manual `trip` against `--switch lts --project ~/caml/ocaml-re`, which
-needs a prepared switch and project. Add a self-contained smoke test that
-builds a tiny fixture closure (one or two trivial packages), runs the
-trip cycle, and asserts the post-restore build stays under a threshold.
-Unit tests for `sexp_parser` and `opam_read` (disjunctions, {post},
-depopts, flat commands, %{pkg:installed}%) would pin the parser fixes.
-
 ## Broaden migrate coverage to a second closure
 
 All migrate validation so far is one closure (ocaml-re + lts, 32
@@ -50,6 +40,16 @@ README limitation: dune's binary cookie format may change across dune
 versions; stored cookies would then be invalid. Detect the dune version
 (or catch cookie rejection) at restore time and degrade gracefully with a
 clear message instead of a confusing build failure.
+
+## Warn when the dune cache cannot hard-link across devices
+
+Found while building the smoke test: with `DUNE_CACHE=enabled`, the
+default storage mode hard-links cache entries, which fails silently when
+the project and `~/.cache/dune` are on different filesystems (e.g.
+project on tmpfs) — the post-restore rebuild then re-runs every package
+build with no error. `DUNE_CACHE_STORAGE_MODE=copy` fixes it. trip (and
+the README's instant-rebuild story) could detect the device mismatch and
+warn or set the storage mode.
 
 ## Thread installed set through opam_read without global state
 

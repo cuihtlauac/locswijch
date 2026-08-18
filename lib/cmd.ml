@@ -21,6 +21,13 @@ let migrate_term =
   Cmd.v info
     Term.(const Migrate.run $ Config.switch_arg $ Config.project_arg)
 
+let threshold_arg =
+  let doc =
+    "Fail if the post-restore rebuild takes longer than $(docv) seconds."
+  in
+  Arg.(value & opt (some float) None
+       & info [ "threshold" ] ~docv:"SECONDS" ~doc)
+
 let trip_term =
   let doc =
     "Full round-trip test: migrate, build, sync, clean+rm dune.lock, \
@@ -28,7 +35,9 @@ let trip_term =
   in
   let info = Cmd.info "trip" ~doc in
   Cmd.v info
-    Term.(const Trip.run $ Config.switch_arg $ Config.project_arg)
+    Term.(const (fun threshold switch project ->
+              Trip.run ?threshold switch project)
+          $ threshold_arg $ Config.switch_arg $ Config.project_arg)
 
 let cmd () =
   let doc = "Bidirectional bridge between dune pkg and opam switches." in

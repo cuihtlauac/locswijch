@@ -19,7 +19,7 @@ let time_command cmd =
   shell cmd;
   Unix.gettimeofday () -. t0
 
-let run switch_name project_root =
+let run ?threshold switch_name project_root =
   let config = Config.resolve ~project_root ~switch_name in
   Printf.printf "locswijch trip: round-trip test\n";
   Printf.printf "  project: %s\n" config.project_root;
@@ -102,7 +102,13 @@ let run switch_name project_root =
              "cd %s && DUNE_CACHE=enabled opam exec -- dune build @install"
              (Filename.quote config.project_root))
       in
-      Printf.printf "  build time: %.1fs\n" t);
+      Printf.printf "  build time: %.1fs\n" t;
+      match threshold with
+      | Some limit when t > limit ->
+        Printf.eprintf "FAIL: post-restore build took %.1fs (threshold %.1fs)\n"
+          t limit;
+        exit 1
+      | _ -> ());
 
   Printf.printf "\n=== TRIP COMPLETE ===\n";
   Printf.printf "All steps succeeded.\n"
