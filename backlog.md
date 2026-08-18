@@ -3,21 +3,34 @@
 Pending work items, one per heading, roughly in priority order. The first
 item is the current task. See changelog.md for completed items.
 
-## Broaden migrate coverage to a second closure
-
-All migrate validation so far is one closure (ocaml-re + lts, 32
-packages, OCaml 4.14.2). Run trip against a larger or differently-shaped
-switch — dune-heavy packages, `conf-*` system packages, packages with
-patches/substs — to flush out the next tier of opam-to-dune translation
-gaps.
-
 ## Generalize package overrides via opam-overlays
 
-`Migrate.apply_overrides` hardcodes the ocamlfind fix. Dune's own lock
-flow uses patched `+dune` packages from ocaml-dune/opam-overlays. When an
-overlay exists for a package/version, migrate could use the overlay's
-build/install instructions instead of the vanilla ones — replacing
-per-package special cases with the community-maintained set.
+`Migrate.apply_overrides` hardcodes fixes for ocamlfind (relocation,
+$PREFIX make-escape, baked conf path) and ocamlbuild (baked -where
+libdir) — both grown during the dream closure validation. Dune's own
+lock flow uses patched `+dune` packages from ocaml-dune/opam-overlays.
+When an overlay exists for a package/version, migrate could use the
+overlay's build/install instructions instead of the vanilla ones —
+replacing per-package special cases with the community-maintained set.
+
+## Handle opam `patches:` in migrate
+
+`patches:` appears nowhere in opam_read.ml. Neither validated closure
+(ocaml-re + lts, dream + dream53) contains a patched package, so this
+has not bitten yet; a closure with one would silently build unpatched.
+Parse the field and emit the corresponding dune lock action (or at least
+fail loudly).
+
+## Report dune cache/toolchain digest coherence bug upstream
+
+Found during dream validation: a locked package's digest does not
+incorporate the toolchain identity. When the compiler's lock entry
+changes (new toolchain digest) but a package's own .pkg text does not,
+dune restores the stale cached artifact built against the old toolchain
+and dependents fail with "inconsistent assumptions over interface"
+(seen with dune-configurator/unix). Only recovery is wiping
+~/.cache/dune/db. Minimal repro: migrate twice with a whitespace change
+to the compiler's build command between runs.
 
 ## Faithful opam metadata for locswijch-created packages
 

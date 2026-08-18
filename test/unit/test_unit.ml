@@ -78,17 +78,24 @@ let make_temp_dir prefix =
   in
   go 0
 
+(* Fixed host platform for deterministic filter evaluation in tests. *)
+let host_vars =
+  [ ("os", "linux"); ("os-family", "debian");
+    ("os-distribution", "ubuntu"); ("os-version", "26.04");
+    ("arch", "x86_64") ]
+
 (* Write a fixture opam file into a minimal switch layout and read it
    back through the public API. *)
-let read_fixture ~switch_dir ~installed_names ~name ~version content =
+let read_fixture ?(host_vars = host_vars) ~switch_dir ~installed_names
+    ~name ~version content =
   let pkg_dir =
     List.fold_left Filename.concat switch_dir
       [ ".opam-switch"; "packages"; name ^ "." ^ version ]
   in
   Locswijch.Hardlink.mkdir_p pkg_dir;
   write_file (Filename.concat pkg_dir "opam") content;
-  Locswijch.Opam_read.read_package_opam ~switch_dir ~installed_names ~name
-    ~version
+  Locswijch.Opam_read.read_package_opam ~host_vars ~switch_dir
+    ~installed_names ~name ~version
 
 let opam_read_tests () =
   let switch_dir = make_temp_dir "locswijch-unit" in
@@ -172,6 +179,87 @@ build: [
         ~expected:[ [ "echo"; "true"; "false"; "false"; "true" ] ]
         ~actual:info.build;
 
+      (* os filters on whole commands are evaluated against the host:
+         definitely-false commands are dropped, matching-os and
+         unknown-variable filters are kept (conf-pkg-config pattern). *)
+      let info =
+        read_fixture ~switch_dir ~installed_names:installed ~name:"oscmd"
+          ~version:"1.0"
+          {|opam-version: "2.0"
+build: [
+  ["pkg-config" "--help"]
+    {os != "win32" & !(os = "macos" & os-distribution = "homebrew")}
+  ["pkgconf" "--version"]
+    {os = "win32" & os-distribution != "msys2" |
+     os = "macos" & os-distribution = "homebrew"}
+  ["dune" "runtest"] {with-test}
+  ["echo" "hi"] {unknown-thing = "yes"}
+]
+|}
+      in
+      check_commands "opam_read: os-filtered commands"
+        ~expected:[ [ "pkg-config"; "--help" ]; [ "echo"; "hi" ] ]
+        ~actual:info.build;
+
+      (* os filters on atoms inside one command: true filters keep the
+         atom (previously all filtered atoms were dropped), false and
+         unknown filters drop it (conf-libssl pattern). *)
+      let info =
+        read_fixture ~switch_dir ~installed_names:installed ~name:"osatom"
+          ~version:"1.0"
+          {|opam-version: "2.0"
+build: [
+  [
+    "pkgconf" {os = "win32" & os-distribution != "cygwinports"}
+    "pkg-config" {os != "win32" | os-distribution = "cygwinports"}
+    "--print-errors"
+    "--exists"
+    "openssl"
+  ]
+    {os != "freebsd" & os != "openbsd" & os != "netbsd" &
+     os-distribution != "homebrew"}
+]
+|}
+      in
+      check_commands "opam_read: os-filtered atoms"
+        ~expected:
+          [ [ "pkg-config"; "--print-errors"; "--exists"; "openssl" ] ]
+        ~actual:info.build;
+
+      (* Dependency alternatives with definitely-false platform filters
+         are dropped even when the package is installed; version
+         constraints are unknown and keep the dep (conf-libev pattern). *)
+      let info =
+        read_fixture ~switch_dir
+          ~installed_names:[ "conf-libev"; "ocaml"; "a" ] ~name:"osdep"
+          ~version:"1.0"
+          {|opam-version: "2.0"
+depends: [
+  ("conf-libev" {os != "win32"} | "ocaml" {os = "win32"})
+  "a" {>= "1.0"}
+]
+|}
+      in
+      check_strings "opam_read: os-filtered dep disjunction"
+        ~expected:[ "conf-libev"; "a" ] ~actual:info.depends;
+
+      (* Host variables inline as constants in strings and idents;
+         os-version bounds compare numerically. *)
+      let info =
+        read_fixture ~switch_dir ~installed_names:installed ~name:"hostvar"
+          ~version:"1.0"
+          {|opam-version: "2.0"
+build: [
+  [ "echo" "%{os}%" arch ]
+  [ "echo" "new" ] {os-version >= "20.04"}
+  [ "echo" "old" ] {os-version <= "7"}
+]
+|}
+      in
+      check_commands "opam_read: host variable inlining and os-version"
+        ~expected:[ [ "echo"; "linux"; "x86_64" ]; [ "echo"; "new" ] ]
+        ~actual:info.build;
+
       (* url section: src and first checksum. *)
       let info =
         read_fixture ~switch_dir ~installed_names:installed ~name:"src"
@@ -189,7 +277,7 @@ url {
 
       (* Missing opam file yields empty defaults. *)
       let info =
-        Locswijch.Opam_read.read_package_opam ~switch_dir
+        Locswijch.Opam_read.read_package_opam ~host_vars ~switch_dir
           ~installed_names:installed ~name:"absent" ~version:"1.0"
       in
       check "opam_read: missing opam file"

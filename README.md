@@ -178,3 +178,14 @@ threshold that a real package rebuild cannot meet. Requires `opam` and
   (hard-links are O(1) per file) but removes stale files from the switch.
 - **migrate is approximate**: the opam-to-dune translation covers common
   patterns but may not handle all opam build instructions perfectly.
+- **The dune on `PATH` orchestrates**: `trip` and `sync` invoke plain
+  `dune`, deliberately not `opam exec -- dune` — opam would resolve the
+  switch from the target project's directory, and a project with a local
+  `_opam` would supply its own (possibly older) dune. The invoking dune
+  must support the locked dune's language version: locking dune ≥ 3.24
+  pulls in satellite packages (`dune-configurator`, `ordering`, ...)
+  whose `dune-project` says `(lang dune 3.24)`.
+- **Filters are evaluated for the migrating host**: os/arch conditions in
+  opam build commands and dependencies are resolved at `migrate` time
+  (the switch's solution is host-specific anyway). The generated
+  `dune.lock/` is not portable across operating systems.

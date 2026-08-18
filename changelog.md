@@ -3,6 +3,34 @@
 Completed backlog items, most recent first. See backlog.md for pending
 work.
 
+## Broaden migrate coverage to a second closure (2026-08-18)
+
+New reference: dream + dream53 (144 packages, OCaml 5.3.0 — conf-*
+system packages, C stubs, ppxlib, topkg/ocamlbuild packages, mirage
+stack, caqti pinned <3 to match dream's source). Two consecutive trips
+pass (post-restore 3.1s) and ocaml-re + lts still passes. Fixes, in
+failure order: (1) opam filters are now statically evaluated against the
+host (os/arch/os-* from `opam var`, with-test/with-doc false,
+three-valued logic; unknown filters keep commands and deps, drop atoms)
+— fixes conf-* build commands running their macos/win32 branches and
+filtered atoms vanishing from flat commands; (2) lock-file command atoms
+are quoted when needed (conf-gmp's `sh -c "a || b"` was emitted
+unquoted); (3) trip and sync invoke plain `dune`, not `opam exec --
+dune`, which resolved the switch from the target project's cwd — dream's
+local _opam supplied dune 3.22, too old for lang 3.24 satellite packages
+and missing the #9873 S_DIR fix; (4) the ocamlfind override now escapes
+$PREFIX in Makefile.config (vanilla configure writes it unescaped, make
+eats "$P" → "REFIX/lib" search path) and bakes the post-sandbox conf
+path into the binary while still installing into the sandbox; (5) new
+ocamlbuild override, same shape (bake final -where libdir at compile,
+override paths back to the sandbox at install) — without it topkg
+packages (mtime, ptime) can't compile myocamlbuild plugins. Findings
+backlogged: `patches:` still unhandled (no closure exercises it), and a
+dune cache coherence bug — package digests don't include the toolchain
+identity, so changing the compiler's lock entry poisons cache hits of
+unchanged packages ("inconsistent assumptions over interface Unix");
+recovery is wiping ~/.cache/dune/db.
+
 ## Scripted smoke test and parser unit tests (2026-08-18)
 
 `dune runtest` now covers the tool. test/unit/ pins the five parser

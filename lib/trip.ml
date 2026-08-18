@@ -42,11 +42,14 @@ let run ?threshold switch_name project_root =
      (enabled-except-user-rules) excludes; without this, step 6 cannot
      skip package rebuilds (dune re-executes any rule absent from
      _build/.db, which dune clean deletes, regardless of restored
-     targets). *)
+     targets). Plain `dune`, not `opam exec -- dune`: opam exec resolves
+     the switch from the project directory, so a project with a local
+     _opam would supply its own (possibly older) dune — the orchestrating
+     dune must be the one locswijch was invoked with. *)
   step "dune build (full, from dune pkg)" (fun () ->
       let t = time_command
           (Printf.sprintf
-             "cd %s && DUNE_CACHE=enabled opam exec -- dune build @install"
+             "cd %s && DUNE_CACHE=enabled dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t);
@@ -68,7 +71,7 @@ let run ?threshold switch_name project_root =
   (* Step 4: dune clean + rm dune.lock *)
   step "dune clean + rm -rf dune.lock/" (fun () ->
       shell
-        (Printf.sprintf "cd %s && opam exec -- dune clean"
+        (Printf.sprintf "cd %s && dune clean"
            (Filename.quote config.project_root));
       Hardlink.remove_tree config.lock_dir;
       assert (not (Sys.file_exists config.lock_dir));
@@ -99,7 +102,7 @@ let run ?threshold switch_name project_root =
   step "dune build (after restore, should skip package rebuilds)" (fun () ->
       let t = time_command
           (Printf.sprintf
-             "cd %s && DUNE_CACHE=enabled opam exec -- dune build @install"
+             "cd %s && DUNE_CACHE=enabled dune build @install"
              (Filename.quote config.project_root))
       in
       Printf.printf "  build time: %.1fs\n" t;

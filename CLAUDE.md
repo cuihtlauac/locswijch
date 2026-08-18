@@ -15,7 +15,8 @@ opam exec -- dune runtest
 ```
 
 Two suites: `test/unit/` (sexp_parser + opam_read parsing, incl. the
-disjunction/{post}/depopts/flat-command/%{pkg:installed}% fixes) and
+disjunction/{post}/depopts/flat-command/%{pkg:installed}% fixes and
+host-side os/arch filter evaluation) and
 `test/smoke/` (full trip cycle against a generated two-package fixture
 closure in a temp dir — no compiler in the lock, so it uses the ambient
 toolchain; hermetic dune cache via XDG_CACHE_HOME; the post-restore
@@ -32,7 +33,12 @@ opam exec -- dune exec ./bin/main.exe -- migrate --switch default --project /pat
 
 # End-to-end round trip: migrate, build, sync, clean+rm dune.lock, restore,
 # rebuild. Destroys the target project's _build/ and dune.lock/ and overwrites
-# the switch. Reference setup: --switch lts --project ~/caml/ocaml-re
+# the switch. Reference setups: --switch lts --project ~/caml/ocaml-re
+# (32 pkgs, OCaml 4.14) and --switch dream53 --project ~/caml/dream
+# (144 pkgs, OCaml 5.3, conf-*/topkg/mirage). The dune on PATH orchestrates
+# the locked builds (trip deliberately avoids `opam exec` on the target
+# project, which would pick up its local _opam); it must support the locked
+# dune's lang version.
 opam exec -- dune exec ./bin/main.exe -- trip --switch lts --project /path/to/project
 ```
 

@@ -17,12 +17,149 @@ type pkg_info = {
    string helpers with no room to thread it through. *)
 let is_installed : (string -> bool) ref = ref (fun _ -> true)
 
+(* Host platform variables (os, os-family, os-distribution, os-version,
+   arch) for static filter evaluation. Set by read_package_opam from the
+   caller-supplied list; empty means unknown, leaving filters that mention
+   them unevaluated. Same global-ref pattern as is_installed above. *)
+let host_vars : (string * string) list ref = ref []
+let set_host_vars vars = host_vars := vars
+
 (* "a+b:installed" means all of a and b are installed. *)
 let resolve_installed_var var =
   let pkgs =
     String.sub var 0 (String.length var - 10) |> String.split_on_char '+'
   in
   if List.for_all !is_installed pkgs then "true" else "false"
+
+(* ---------- Static filter evaluation ----------
+
+   Filters are evaluated at migrate time against the host platform: the
+   generated lock file is host-specific anyway, since the switch's
+   solution already fixed os and arch. Three-valued logic — a filter we
+   cannot resolve (e.g. a version constraint on the enclosing package,
+   which shares the {...} syntax) evaluates to FUnknown and the caller
+   picks the conservative side. *)
+type filter_result = FTrue | FFalse | FUnknown
+
+let lookup_filter_var s =
+  match s with
+  | "with-test" | "with-doc" | "with-dev-setup" | "dev" | "pinned" ->
+    Some "false"
+  | "build" -> Some "true"
+  | s when String.length s > 10
+           && String.sub s (String.length s - 10) 10 = ":installed" ->
+    Some (resolve_installed_var s)
+  | s -> List.assoc_opt s !host_vars
+
+(* Compare version-ish strings, approximately as opam does: alternating
+   numeric and non-numeric chunks, numeric chunks compared as integers.
+   Falls back to plain string comparison of chunks, which also covers
+   equality tests on os names. *)
+let version_compare a b =
+  let is_digit c = c >= '0' && c <= '9' in
+  let chunks s =
+    let n = String.length s in
+    let rec go i acc =
+      if i >= n then List.rev acc
+      else begin
+        let d = is_digit s.[i] in
+        let j = ref i in
+        while !j < n && is_digit s.[!j] = d do incr j done;
+        go !j ((d, String.sub s i (!j - i)) :: acc)
+      end
+    in
+    go 0 []
+  in
+  let cmp_chunk (da, ca) (db, cb) =
+    match da, db with
+    | true, true ->
+      (* Numeric: longer (zero-stripped) wins, then lexicographic. *)
+      let strip s =
+        let i = ref 0 in
+        while !i < String.length s - 1 && s.[!i] = '0' do incr i done;
+        String.sub s !i (String.length s - !i)
+      in
+      let ca = strip ca and cb = strip cb in
+      let c = compare (String.length ca) (String.length cb) in
+      if c <> 0 then c else compare ca cb
+    | false, false -> compare ca cb
+    | true, false -> 1
+    | false, true -> -1
+  in
+  let rec cmp la lb =
+    match la, lb with
+    | [], [] -> 0
+    | [], _ -> -1
+    | _, [] -> 1
+    | a :: ra, b :: rb ->
+      let c = cmp_chunk a b in
+      if c <> 0 then c else cmp ra rb
+  in
+  cmp (chunks a) (chunks b)
+
+let rec eval_filter (f : OpamParserTypes.FullPos.value) =
+  let open OpamParserTypes.FullPos in
+  match f.pelem with
+  | Bool true -> FTrue
+  | Bool false -> FFalse
+  | Ident s ->
+    (match lookup_filter_var s with
+     | Some "true" -> FTrue
+     | Some "false" -> FFalse
+     | Some _ | None -> FUnknown)
+  | Logop ({ pelem = `And; _ }, a, b) ->
+    (match eval_filter a, eval_filter b with
+     | FFalse, _ | _, FFalse -> FFalse
+     | FTrue, FTrue -> FTrue
+     | _ -> FUnknown)
+  | Logop ({ pelem = `Or; _ }, a, b) ->
+    (match eval_filter a, eval_filter b with
+     | FTrue, _ | _, FTrue -> FTrue
+     | FFalse, FFalse -> FFalse
+     | _ -> FUnknown)
+  | Pfxop ({ pelem = `Not; _ }, v) ->
+    (match eval_filter v with
+     | FTrue -> FFalse
+     | FFalse -> FTrue
+     | FUnknown -> FUnknown)
+  | Pfxop ({ pelem = `Defined; _ }, { pelem = Ident s; _ }) ->
+    if lookup_filter_var s = None then FFalse else FTrue
+  | Group { pelem = vs; _ } -> eval_filters vs
+  | Relop ({ pelem = op; _ }, a, b) ->
+    (match filter_str a, filter_str b with
+     | Some x, Some y ->
+       let c = version_compare x y in
+       let holds =
+         match op with
+         | `Eq -> c = 0
+         | `Neq -> c <> 0
+         | `Geq -> c >= 0
+         | `Gt -> c > 0
+         | `Leq -> c <= 0
+         | `Lt -> c < 0
+       in
+       if holds then FTrue else FFalse
+     | _ -> FUnknown)
+  | _ -> FUnknown
+
+and filter_str (v : OpamParserTypes.FullPos.value) =
+  match v.pelem with
+  | OpamParserTypes.FullPos.String s -> Some s
+  | OpamParserTypes.FullPos.Ident s -> lookup_filter_var s
+  | _ -> None
+
+(* A filter list {f1 f2} is a conjunction. *)
+and eval_filters fs =
+  List.fold_left
+    (fun acc f ->
+      match acc with
+      | FFalse -> FFalse
+      | _ -> (
+        match acc, eval_filter f with
+        | FFalse, _ | _, FFalse -> FFalse
+        | FTrue, FTrue -> FTrue
+        | _ -> FUnknown))
+    FTrue fs
 
 let parse_pkg_ident s =
   (* "name.version" *)
@@ -108,7 +245,11 @@ let opam_ident_to_dune s =
     | s when String.length s > 10
              && String.sub s (String.length s - 10) 10 = ":installed" ->
       resolve_installed_var s
-    | _ -> "%{" ^ s ^ "}"
+    | _ -> (
+      (* Host platform variables (os, arch, ...) inline as constants *)
+      match List.assoc_opt s !host_vars with
+      | Some v -> v
+      | None -> "%{" ^ s ^ "}")
 
 let translate_opam_string_vars s =
   (* Replace opam %{_:var}% with dune %{pkg-self:var}
@@ -129,7 +270,10 @@ let translate_opam_string_vars s =
           else if String.length var > 10
                   && String.sub var (String.length var - 10) 10 = ":installed"
           then (true, resolve_installed_var var)
-          else (false, "")
+          else
+            match List.assoc_opt var !host_vars with
+            | Some v -> (true, v)
+            | None -> (false, "")
         in
         if is_const then begin
           Buffer.add_string buf const_val;
@@ -158,10 +302,16 @@ let translate_opam_string_vars s =
   done;
   Buffer.contents buf
 
-let extract_value (v : OpamParserTypes.FullPos.value) =
+let rec extract_value (v : OpamParserTypes.FullPos.value) =
   match v.pelem with
   | OpamParserTypes.FullPos.String s -> Some (translate_opam_string_vars s)
   | OpamParserTypes.FullPos.Ident s -> Some (opam_ident_to_dune s)
+  | OpamParserTypes.FullPos.Option (inner, { pelem = filters; _ }) ->
+    (* Filtered atom inside a command, e.g.
+       "pkg-config" {os != "win32"}: keep only when the filter definitely
+       holds. Unknown filters drop the atom, matching opam's evaluation
+       with test/doc disabled. *)
+    if eval_filters filters = FTrue then extract_value inner else None
   | _ -> None
 
 let extract_string_list items = List.filter_map extract_value items
@@ -188,6 +338,11 @@ let rec dep_names (d : OpamParserTypes.FullPos.value) =
   | OpamParserTypes.FullPos.Ident s -> [ s ]
   | OpamParserTypes.FullPos.Option (v, { pelem = filters; _ }) ->
     if List.exists contains_post filters then []
+    else if eval_filters filters = FFalse then
+      (* Definitely-false platform filter, e.g. the "ocaml" {os = "win32"}
+         alternative of conf-libev's disjunction. Version constraints
+         evaluate to FUnknown and keep the dep. *)
+      []
     else dep_names v
   | OpamParserTypes.FullPos.Logop (_, a, b) ->
     dep_names a @ dep_names b
@@ -222,15 +377,22 @@ let extract_command_lists items =
           let cmd = extract_string_list args in
           if cmd = [] then None else Some cmd
         | OpamParserTypes.FullPos.Option
-            ({ pelem = List { pelem = args; _ }; _ }, _) ->
-          (* Command with filter, e.g. ["cmd" "arg"] {condition} *)
-          let cmd = extract_string_list args in
-          if cmd = [] then None else Some cmd
+            ({ pelem = List { pelem = args; _ }; _ }, { pelem = filters; _ })
+          ->
+          (* Command with filter, e.g. ["cmd" "arg"] {condition}: drop
+             only when the filter definitely fails (os mismatch,
+             with-test, ...); unknown filters keep the command. *)
+          if eval_filters filters = FFalse then None
+          else
+            let cmd = extract_string_list args in
+            if cmd = [] then None else Some cmd
         | _ -> None)
       items
 
-let read_package_opam ~switch_dir ~installed_names ~name ~version =
+let read_package_opam ~host_vars ~switch_dir ~installed_names ~name
+    ~version =
   is_installed := (fun p -> List.mem p installed_names);
+  set_host_vars host_vars;
   let pkg_dir =
     List.fold_left Filename.concat switch_dir
       [ ".opam-switch"; "packages"; name ^ "." ^ version ]

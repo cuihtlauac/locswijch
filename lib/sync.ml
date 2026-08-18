@@ -18,11 +18,14 @@ let ensure_switch_skeleton switch_dir =
 
 (* The lock dir names packages but carries no digests, and several digest
    dirs can share a name and version, so only dune can say which one the
-   current dune.lock builds. Ask it rather than recompute its digest. *)
+   current dune.lock builds. Ask it rather than recompute its digest.
+   Plain `dune`, not `opam exec -- dune`: opam exec resolves the switch
+   from the project directory, so a project with a local _opam would
+   supply its own dune, possibly one without this subcommand. *)
 let live_digest_dir ~project_root name =
   let cmd =
     Printf.sprintf
-      "cd %s && opam exec -- dune pkg print-digest %s 2>/dev/null"
+      "cd %s && dune pkg print-digest %s 2>/dev/null"
       (Filename.quote project_root) (Filename.quote name)
   in
   let ic = Unix.open_process_in cmd in
