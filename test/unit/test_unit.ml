@@ -283,9 +283,155 @@ url {
       check "opam_read: missing opam file"
         (info.depends = [] && info.build = [] && info.url = None))
 
+(* ---------- Pkg_file: portable lock format ---------- *)
+
+(* Fixtures are verbatim excerpts from a real `dune pkg lock` run
+   (ocaml.org dune_pkg branch, dune 3.24.2, lang package 0.1): the
+   portable format wraps fields in all_platforms / choice, names files
+   <name>.<version>.pkg, and records the compiler in lock.dune. *)
+
+let pkg_file_tests () =
+  let lock_dir = make_temp_dir "locswijch-lock" in
+  Fun.protect
+    ~finally:(fun () -> Locswijch.Hardlink.remove_tree lock_dir)
+    (fun () ->
+      write_file (Filename.concat lock_dir "cmdliner.1.3.0.pkg")
+        {|(version 1.3.0)
+
+(install
+ (all_platforms
+  (progn
+   (run %{make} install LIBDIR=%{pkg-self:lib} DOCDIR=%{pkg-self:doc})
+   (run %{make} install-doc LIBDIR=%{pkg-self:lib} DOCDIR=%{pkg-self:doc}))))
+
+(build
+ (all_platforms ((action (run %{make} all PREFIX=%{prefix})))))
+
+(depends
+ (all_platforms (ocaml)))
+
+(source
+ (fetch
+  (url https://erratique.ch/software/cmdliner/releases/cmdliner-1.3.0.tbz)
+  (checksum
+   sha512=4c46bc334444ff772637deae2f5ba03645d7a1b7db523470a1246acfce79b971c)))
+|};
+      write_file (Filename.concat lock_dir "ocaml-base-compiler.5.2.0.pkg")
+        {|(version 5.2.0)
+
+(install
+ (all_platforms
+  (run %{make} install)))
+
+(build
+ (choice
+  ((((arch x86_64)
+     (os linux))
+    ((arch arm64)
+     (os linux)))
+   ((action
+     (progn
+      (run ./configure --prefix=%{prefix} -C)
+      (run %{make} -j%{jobs})))))
+  ((((arch x86_64)
+     (os macos))
+    ((arch arm64)
+     (os macos)))
+   ((action
+     (progn
+      (run ./configure --prefix=%{prefix} -C CC=cc "ASPP=cc -c")
+      (run %{make} -j%{jobs})))))))
+
+(source
+ (fetch
+  (url https://github.com/ocaml/ocaml/archive/5.2.0.tar.gz)
+  (checksum
+   sha256=48554abfd530fcdaa08f23f801b699e4f74c320ddf7d0bd56b0e8c24e55fc911)))
+
+(exported_env
+ (= CAML_LD_LIBRARY_PATH "\%{lib}%/stublibs"))
+
+(extra_sources
+ (ocaml-base-compiler.install
+  (fetch
+   (url
+    https://raw.githubusercontent.com/ocaml/opam-source-archives/main/patches/ocaml-base-compiler/ocaml-base-compiler.install)
+   (checksum
+    sha256=79f2a1a5044a91350a0eb6ce12e261a72a2855c094c425cddf3860e58c486678))))
+|};
+      write_file (Filename.concat lock_dir "ocamlfind.1.9.8+dune.pkg")
+        {|(version 1.9.8+dune)
+
+(build
+ (all_platforms
+  ((action
+    (progn
+     (run ./configure -bindir %{bindir} -sitelib %{lib_root} -mandir %{man})
+     (run %{make} all)
+     (run %{make} opt))))))
+
+(depends
+ (all_platforms (ocaml)))
+
+(source
+ (fetch
+  (url
+   https://github.com/ocaml/ocamlfind/archive/refs/tags/findlib-1.9.8.tar.gz)
+  (checksum
+   sha256=cfcc1d6cec78d47e1e40cd571d02f1a4c1e9438500ce35d0d268f5c4b8afeaad)))
+|};
+      write_file (Filename.concat lock_dir "lock.dune")
+        {|(lang package 0.1)
+
+(dependency_hash d4c3de3d83fcd1d3c6373552b739187b)
+
+(ocaml ocaml-base-compiler)
+
+(repositories
+ (complete true)
+ (used
+  ((source
+    https://github.com/ocaml/opam-repository#584630e7a7e27e3cf56158696a3fe94623))))
+
+(solved_for_platforms
+ ((arch x86_64)
+  (os linux))
+ ((arch arm64)
+  (os linux)))
+|};
+      let pkgs = Locswijch.Pkg_file.load_all ~lock_dir in
+      let find name =
+        List.find (fun p -> p.Locswijch.Pkg_file.name = name) pkgs
+      in
+      check "pkg_file: all portable files load" (List.length pkgs = 3);
+      let cmdliner = find "cmdliner" in
+      check "pkg_file: version from portable file"
+        (cmdliner.Locswijch.Pkg_file.version = "1.3.0");
+      check_strings "pkg_file: depends through all_platforms"
+        ~expected:[ "ocaml" ] ~actual:cmdliner.Locswijch.Pkg_file.depends;
+      check "pkg_file: source url through fetch"
+        ((match cmdliner.Locswijch.Pkg_file.source with
+          | Some s -> s.Locswijch.Pkg_file.url
+          | None -> "")
+         = "https://erratique.ch/software/cmdliner/releases/cmdliner-1.3.0.tbz");
+      check "pkg_file: build kept for all_platforms wrapper"
+        (cmdliner.Locswijch.Pkg_file.build <> None);
+      let compiler = find "ocaml-base-compiler" in
+      check "pkg_file: choice build kept raw"
+        (compiler.Locswijch.Pkg_file.build <> None);
+      check "pkg_file: exported_env through portable file"
+        (List.length compiler.Locswijch.Pkg_file.exported_env = 1);
+      let ocamlfind = find "ocamlfind" in
+      check "pkg_file: +dune overlay version from filename-and-field"
+        (ocamlfind.Locswijch.Pkg_file.version = "1.9.8+dune");
+      check "pkg_file: lock.dune ocaml entry"
+        (Locswijch.Pkg_file.read_ocaml_pkg ~lock_dir
+         = Some "ocaml-base-compiler"))
+
 let () =
   sexp_tests ();
   opam_read_tests ();
+  pkg_file_tests ();
   if !failures > 0 then begin
     Printf.printf "%d check(s) failed\n" !failures;
     exit 1

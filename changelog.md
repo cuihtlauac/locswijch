@@ -3,6 +3,57 @@
 Completed backlog items, most recent first. See backlog.md for pending
 work.
 
+## Can locswijch back up ocaml.org PR 3281? (2026-08-18)
+
+Answer: yes for the on-machine escape hatch, with one missing piece now
+backlogged (toolchain compiler sync); no for ephemeral CI, where a new
+export subcommand is the right shape (backlogged, judged feasible).
+Investigated against a worktree of the PR branch (`dune_pkg`, head
+d2b11f8). The PR does not commit `dune.lock/` — its Makefile and CI
+relock every run against repos pinned in `dune-workspace`
+(opam-repository 584630e + opam-overlays 2a95432), so any fallback needs
+a committed lock or export artifact. Findings by sub-question: (1)
+**Lock format**: `dune pkg lock` (dune 3.24.2) produced a 182-package
+portable lock — flat `<name>.<version>.pkg` files, `all_platforms`
+wrappers in 179 of them, `choice` with platform-set keys in 3 (conf-gmp,
+conf-pkg-config, ocaml-base-compiler), `+dune` overlay versions for
+ocamlfind/ocamlbuild, `extra_sources`, no package carrying `patches:`.
+`Pkg_file.load_all` parses all 182 correctly (names, versions, deps
+through `all_platforms`, sources, exported_env); build/install stay raw
+sexps, which sync never interprets. New unit tests pin this with
+verbatim fixtures from the real lock. (2) **Forward sync**: after
+`dune build` of the web server target, sync landed all 182 packages in a
+fresh empty switch (178 lib dirs, manifests, stub metadata; `opam
+list`/`show` clean). One real bug found and fixed: opam caches
+installed-package definitions in `.opam-switch/packages/cache`, and
+`opam switch create --empty` writes it before sync populates the switch,
+making opam report "No definition found" for a stale subset —
+`ensure_switch_skeleton` now deletes that cache. (3) **Escape hatch**:
+blocked as-is because the toolchain-built compiler leaves only a husk in
+`_build/.pkg/` (binaries and stdlib live in `~/.cache/dune/toolchains/`)
+— the synced switch has no `bin/ocaml*`/`lib/ocaml`, and builds pick up
+the ambient compiler and fail on cmi version mismatches. Hard-linking
+the toolchain target into the switch by hand made the full ocaml.org
+build pass without `dune.lock/`, so the fix is mechanical (backlogged as
+the new top item). Second constraint: the driving dune must be at least
+the version that wrote the artifacts (a stray dune 3.20.1 on PATH
+rejected `(lang dune 3.24)` dune-package files). (4) **Revert
+scenario**: the switch is opam-visible but not opam-*operable* — any
+solver action, even installing one leaf package, wants ~175
+recompilations because stubs omit the compiler's virtual companions
+(base-bigarray/base-domains/base-nnp, ocaml-options-vanilla), dune is
+absent, and the repo swaps the +dune overlay versions for vanilla ones.
+Recovery after a revert is therefore a fresh opam switch (or the
+faithful-metadata item, now scoped with this probe data); the synced
+switch's value is keeping development moving meanwhile. (5) **CI
+fallback**: locswijch cannot help an ephemeral runner directly (synced
+switches embed absolute paths), but a metadata-only export — lock to
+`opam switch export` pin set, overlay versions as URL pins — is feasible
+with the parsing already in place; backlogged. Scratch artifacts kept
+for follow-ups: worktree `~/caml/ocamlorg-o3281` (PR checkout, lock,
+1.7G build) and switch `locswijch-o3281` (synced, toolchain compiler
+hand-linked in).
+
 ## Broaden migrate coverage to a second closure (2026-08-18)
 
 New reference: dream + dream53 (144 packages, OCaml 5.3.0 — conf-*

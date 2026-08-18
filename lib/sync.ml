@@ -14,7 +14,16 @@ let ensure_switch_skeleton switch_dir =
     (fun f ->
       let path = Filename.concat switch_dir f in
       if not (Sys.file_exists path) then close_out (open_out path))
-    [ ".opam-switch/lock"; ".opam-switch/reinstall" ]
+    [ ".opam-switch/lock"; ".opam-switch/reinstall" ];
+  (* opam caches installed-package definitions in packages/cache (e.g.
+     written by `opam switch create --empty` before sync populates the
+     switch). A stale cache makes opam report "No definition found" for
+     packages whose stubs postdate it, so drop it and let opam rescan. *)
+  let opam_cache =
+    List.fold_left Filename.concat switch_dir
+      [ ".opam-switch"; "packages"; "cache" ]
+  in
+  if Sys.file_exists opam_cache then Sys.remove opam_cache
 
 (* The lock dir names packages but carries no digests, and several digest
    dirs can share a name and version, so only dune can say which one the
