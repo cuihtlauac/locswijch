@@ -28,7 +28,7 @@ opam exec -- dune exec ./bin/main.exe -- trip --switch lts --project /path/to/pr
 
 ```
 bin/main.ml          CLI entry point, delegates to Locswijch.Main.run
-lib/cmd.ml           Cmdliner subcommand definitions (sync, restore, migrate)
+lib/cmd.ml           Cmdliner subcommand definitions (sync, restore, migrate, trip)
 lib/main.ml          Top-level dispatch
 lib/config.ml        Path resolution: project root, _build/.pkg/, dune.lock/,
                      switch dir, same-device detection
@@ -42,6 +42,7 @@ lib/hardlink.ml      Hard-link with cross-device copy fallback, recursive tree o
 lib/sync.ml          Sync command: _build/.pkg/ -> opam switch
 lib/restore.ml       Restore command: opam switch -> _build/.pkg/
 lib/migrate.ml       Migrate command: opam switch -> dune.lock/
+lib/trip.ml          Trip command: end-to-end round-trip test
 ```
 
 ## Key design decisions
