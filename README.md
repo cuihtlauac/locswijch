@@ -117,7 +117,12 @@ locswijch sync          # keep switch in sync (fast, idempotent)
 
 ### Sync
 
-1. Enumerates `_build/_private/default/.pkg/<name>.<ver>-<digest>/` directories.
+1. Enumerates `_build/_private/default/.pkg/<name>.<ver>-<digest>/` directories,
+   keeping only the digest dirs the current `dune.lock` builds (asked via
+   `dune pkg print-digest`, never recomputed). Stale digest dirs — accumulated
+   across `migrate` iterations — are deleted from both `_build/.pkg/` and the
+   switch store; if the dune in `PATH` lacks `print-digest`, pruning is
+   skipped with a warning and everything is synced as before.
 2. For each package with a `target/` subdirectory:
    - Hard-links files into the switch prefix (`lib/`, `bin/`, etc.).
    - Generates an `.install` manifest listing which files belong to this

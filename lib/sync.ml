@@ -16,6 +16,38 @@ let ensure_switch_skeleton switch_dir =
       if not (Sys.file_exists path) then close_out (open_out path))
     [ ".opam-switch/lock"; ".opam-switch/reinstall" ]
 
+(* The lock dir names packages but carries no digests, and several digest
+   dirs can share a name and version, so only dune can say which one the
+   current dune.lock builds. Ask it rather than recompute its digest. *)
+let live_digest_dir ~project_root name =
+  let cmd =
+    Printf.sprintf
+      "cd %s && opam exec -- dune pkg print-digest %s 2>/dev/null"
+      (Filename.quote project_root) (Filename.quote name)
+  in
+  let ic = Unix.open_process_in cmd in
+  let line = try Some (String.trim (input_line ic)) with End_of_file -> None in
+  match (Unix.close_process_in ic, line) with
+  | Unix.WEXITED 0, Some l when l <> "" -> Some l
+  | _ -> None
+
+(* Digest dirnames the current dune.lock builds, or None (no pruning) when
+   dune cannot tell us, e.g. a dune without `dune pkg print-digest`. *)
+let live_digest_set ~project_root pkgs =
+  let rec loop acc = function
+    | [] -> Some acc
+    | pkg :: rest -> (
+      match live_digest_dir ~project_root pkg.Pkg_file.name with
+      | Some dir -> loop (dir :: acc) rest
+      | None ->
+        Printf.eprintf
+          "Warning: `dune pkg print-digest %s` failed; \
+           not pruning stale digest dirs.\n"
+          pkg.Pkg_file.name;
+        None)
+  in
+  loop [] pkgs
+
 let sync_package config digest_dir =
   let target_dir = Filename.concat digest_dir "target" in
   if not (Sys.file_exists target_dir) then None
@@ -63,18 +95,30 @@ let run switch_name project_root =
   (* Load package metadata from dune.lock *)
   let pkgs = Pkg_file.load_all ~lock_dir:config.lock_dir in
   let ocaml_pkg = Pkg_file.read_ocaml_pkg ~lock_dir:config.lock_dir in
+  let live_set = live_digest_set ~project_root:config.project_root pkgs in
+  let is_live entry =
+    match live_set with None -> true | Some dirs -> List.mem entry dirs
+  in
   (* Create switch skeleton *)
   ensure_switch_skeleton config.switch_dir;
-  (* Sync each package *)
+  (* Sync each live package; prune digest dirs the current lock does not
+     build (accumulated across migrate iterations, or restored from a
+     switch synced before pruning existed) *)
   let entries = Sys.readdir config.build_pkg_dir in
   let synced_names = ref [] in
+  let pruned_build = ref 0 in
   Array.iter
     (fun entry ->
       let full_path = Filename.concat config.build_pkg_dir entry in
       if Sys.is_directory full_path then
-        match sync_package config full_path with
-        | Some name -> synced_names := name :: !synced_names
-        | None -> ())
+        if is_live entry then
+          match sync_package config full_path with
+          | Some name -> synced_names := name :: !synced_names
+          | None -> ()
+        else begin
+          Hardlink.remove_tree full_path;
+          incr pruned_build
+        end)
     entries;
   (* Generate opam metadata *)
   let synced_pkgs =
@@ -101,6 +145,22 @@ let run switch_name project_root =
           ~dst:(Filename.concat locswijch_dir name)
           ~same_device:config.same_device)
     lock_entries;
+  (* Prune stale digest dirs from the switch store so restore only brings
+     back the live set. Top-level files are the dune.lock backup: keep. *)
+  let pruned_switch = ref 0 in
+  if live_set <> None then
+    Array.iter
+      (fun entry ->
+        let full = Filename.concat locswijch_dir entry in
+        if Sys.is_directory full && not (is_live entry) then begin
+          Hardlink.remove_tree full;
+          incr pruned_switch
+        end)
+      (Sys.readdir locswijch_dir);
+  if !pruned_build > 0 || !pruned_switch > 0 then
+    Printf.printf
+      "Pruned stale digest dirs: %d from _build/.pkg/, %d from switch store\n"
+      !pruned_build !pruned_switch;
   if not config.same_device then
     Printf.eprintf
       "Warning: _build and switch are on different devices. \

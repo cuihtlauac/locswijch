@@ -3,15 +3,6 @@
 Pending work items, one per heading, roughly in priority order. The first
 item is the current task. See changelog.md for completed items.
 
-## Prune stale package digest dirs in sync
-
-`_build/_private/default/.pkg/` accumulates digest directories across
-migrate iterations (observed: 87 dirs for 32 live packages after a few
-trip runs). Sync faithfully mirrors all of them into the switch, so the
-switch store grows too, and restore brings them all back. Sync should
-prune digests absent from the current `dune.lock/` — from both the switch
-store and (optionally) `_build/.pkg/`.
-
 ## Scripted smoke test
 
 CLAUDE.md says "no test suite yet"; the only end-to-end check is the

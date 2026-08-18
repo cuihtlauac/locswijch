@@ -48,7 +48,10 @@ lib/trip.ml          Trip command: end-to-end round-trip test
 ## Key design decisions
 
 - **Pkg_digest directory names are stored verbatim**, never recomputed. Avoids
-  coupling to dune's internal digest algorithm.
+  coupling to dune's internal digest algorithm. Liveness (which digest dir the
+  current dune.lock builds) is asked from `dune pkg print-digest`; sync prunes
+  the rest from `_build/.pkg/` and the switch store, or skips pruning with a
+  warning if the command is unavailable.
 - **Cookie files are opaque binary blobs**, copied as-is. No dependency on
   dune's Persistent serialization module.
 - **Full re-sync every time** (idempotent). Hard links make this cheap.

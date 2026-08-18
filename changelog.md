@@ -3,6 +3,20 @@
 Completed backlog items, most recent first. See backlog.md for pending
 work.
 
+## Prune stale package digest dirs in sync (2026-08-18)
+
+Digest dirs accumulated across migrate iterations (81 for 32 live
+packages on ocaml-re + lts) because sync mirrored everything and restore
+brought it all back. The lock dir carries no digests and duplicates share
+name and version, so liveness is asked from `dune pkg print-digest`
+(~70ms/package), never recomputed. Sync now syncs only live digest dirs —
+also fixing a nondeterministic last-wins overwrite of prefix files and
+.install manifests among same-name duplicates — and deletes stale dirs
+from both `_build/.pkg/` and the switch store (81 → 32); if dune lacks the
+subcommand it warns and skips pruning. Stale `.install` files are left
+alone: on a real opam switch they belong to opam-installed packages. Two
+consecutive trips pass with counts stable at 32.
+
 ## Publish to GitHub with MIT license (2026-08-18)
 
 Created cuihtlauac/locswijch (public), pushed full history after checking
