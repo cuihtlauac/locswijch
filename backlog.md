@@ -70,3 +70,25 @@ warn or set the storage mode.
 `read_package_opam` because the string translators have "no room to
 thread it through" (its own comment). Refactor the translators to take a
 context parameter.
+
+## Detect embedded _build/cache paths in synced switches
+
+A synced switch is not self-contained: some installed files embed
+absolute paths into the project's `_build/` or `~/.cache/dune/`
+(ocamlfind's findlib.conf points its stdlib entry at the dune toolchain
+dir; the binary's baked conf path points into `_build/.pkg/`). Hard
+links keep the switch's *files* alive after `dune clean`, but embedded
+paths only stay valid while restore recreates `_build` and the toolchain
+cache survives trimming. Sync could scan the payload for references to
+`_build`/`~/.cache/dune` and warn (or eventually rewrite), so the
+dependency is visible instead of a latent breakage.
+
+## Validate opam operations against a synced switch
+
+The round trip proves a synced switch serves locswijch (restore,
+migrate) and day-to-day builds, but no test exercises it *through opam*:
+`opam install <pkg>` into it, `opam list`, `opam remove`. With authentic
+per-package metadata (opam-born switches) this should plausibly work;
+verify against the lts/dream53 references — possibly as a trip
+extension — and record what breaks with stub metadata (ties into the
+faithful-metadata item).
