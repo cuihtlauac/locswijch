@@ -4,7 +4,7 @@ version: "0.1.0"
 synopsis: "Bidirectional bridge between dune pkg and opam switches"
 maintainer: "Cuihtlauac Alvarado"
 authors: "Cuihtlauac Alvarado"
-license: "ISC"
+license: "MIT"
 homepage: "https://github.com/cuihtlauac/locswijch"
 bug-reports: "https://github.com/cuihtlauac/locswijch/issues"
 depends: [
