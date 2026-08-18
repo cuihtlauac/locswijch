@@ -3,6 +3,38 @@
 Pending work items, one per heading, roughly in priority order. The first
 item is the current task. See changelog.md for completed items.
 
+## Report dune cache/toolchain digest coherence bug upstream
+
+Found during dream validation (2026-08-18): a locked package's digest
+does not incorporate the toolchain identity. When the compiler's lock
+entry changes (new toolchain digest) but a package's own .pkg text does
+not, dune restores the stale cached artifact built against the old
+toolchain and dependents fail with "inconsistent assumptions over
+interface" (seen with dune-configurator/unix). Only recovery is wiping
+~/.cache/dune/db. Minimal repro: migrate twice with a whitespace change
+to the compiler's build command between runs. Cheap and self-contained;
+do it while the details are fresh (redact local paths per publishing
+rules).
+
+## Handle opam `patches:` in migrate
+
+`patches:` appears nowhere in opam_read.ml. Neither validated closure
+(ocaml-re + lts, dream + dream53) contains a patched package, so this
+has not bitten yet; a closure with one would silently build unpatched.
+Parse the field and emit the corresponding dune lock action (or at least
+fail loudly). Prerequisite for the opam-overlays item below: overlay
+`+dune` packages carry `patches:` plus extra sources, so overrides via
+overlays would silently drop their patches without this.
+
+## Thread installed set through opam_read without global state
+
+`Opam_read.is_installed` is a mutable global ref set by
+`read_package_opam`; the filter-evaluation work added a second one,
+`host_vars`, with the same excuse (the string translators have "no room
+to thread it through"). Refactor the translators to take a context
+parameter. Doing this before the patches/overlays work keeps that rework
+of opam_read from compounding the debt.
+
 ## Generalize package overrides via opam-overlays
 
 `Migrate.apply_overrides` hardcodes fixes for ocamlfind (relocation,
@@ -12,25 +44,19 @@ lock flow uses patched `+dune` packages from ocaml-dune/opam-overlays.
 When an overlay exists for a package/version, migrate could use the
 overlay's build/install instructions instead of the vanilla ones —
 replacing per-package special cases with the community-maintained set.
+Depends on `patches:` support (above). Also shrinks the embedded-paths
+problem (below): the overlay ocamlfind is properly relocatable.
 
-## Handle opam `patches:` in migrate
+## Validate opam operations against a synced switch
 
-`patches:` appears nowhere in opam_read.ml. Neither validated closure
-(ocaml-re + lts, dream + dream53) contains a patched package, so this
-has not bitten yet; a closure with one would silently build unpatched.
-Parse the field and emit the corresponding dune lock action (or at least
-fail loudly).
-
-## Report dune cache/toolchain digest coherence bug upstream
-
-Found during dream validation: a locked package's digest does not
-incorporate the toolchain identity. When the compiler's lock entry
-changes (new toolchain digest) but a package's own .pkg text does not,
-dune restores the stale cached artifact built against the old toolchain
-and dependents fail with "inconsistent assumptions over interface"
-(seen with dune-configurator/unix). Only recovery is wiping
-~/.cache/dune/db. Minimal repro: migrate twice with a whitespace change
-to the compiler's build command between runs.
+The round trip proves a synced switch serves locswijch (restore,
+migrate) and day-to-day builds, but no test exercises it *through opam*:
+`opam install <pkg>` into it, `opam list`, `opam remove`. With authentic
+per-package metadata (opam-born switches) this should plausibly work;
+verify against the lts/dream53 references — possibly as a trip
+extension. This is the probe that scopes the faithful-metadata item
+below: it records exactly which fields opam consults and where stubs
+break, so run it first.
 
 ## Faithful opam metadata for locswijch-created packages
 
@@ -39,37 +65,8 @@ to the compiler's build command between runs.
 sections. A switch created by locswijch from scratch (pure dune-pkg
 project, no prior opam metadata) therefore cannot be migrated back.
 Translate the lock file's build/install/depends fully so the round trip
-also works for switches locswijch itself created.
-
-## Derive lock.dune repositories from the switch
-
-`Migrate.write_lock_dune` hardcodes
-`https://github.com/ocaml/opam-repository.git`. Read the switch's actual
-repository selections (e.g. pins, custom repos) and emit those instead.
-
-## Cookie format version guard
-
-README limitation: dune's binary cookie format may change across dune
-versions; stored cookies would then be invalid. Detect the dune version
-(or catch cookie rejection) at restore time and degrade gracefully with a
-clear message instead of a confusing build failure.
-
-## Warn when the dune cache cannot hard-link across devices
-
-Found while building the smoke test: with `DUNE_CACHE=enabled`, the
-default storage mode hard-links cache entries, which fails silently when
-the project and `~/.cache/dune` are on different filesystems (e.g.
-project on tmpfs) — the post-restore rebuild then re-runs every package
-build with no error. `DUNE_CACHE_STORAGE_MODE=copy` fixes it. trip (and
-the README's instant-rebuild story) could detect the device mismatch and
-warn or set the storage mode.
-
-## Thread installed set through opam_read without global state
-
-`Opam_read.is_installed` is a mutable global ref set by
-`read_package_opam` because the string translators have "no room to
-thread it through" (its own comment). Refactor the translators to take a
-context parameter.
+also works for switches locswijch itself created. Scope with the results
+of the opam-operations probe (above).
 
 ## Detect embedded _build/cache paths in synced switches
 
@@ -81,14 +78,30 @@ links keep the switch's *files* alive after `dune clean`, but embedded
 paths only stay valid while restore recreates `_build` and the toolchain
 cache survives trimming. Sync could scan the payload for references to
 `_build`/`~/.cache/dune` and warn (or eventually rewrite), so the
-dependency is visible instead of a latent breakage.
+dependency is visible instead of a latent breakage. Revisit after the
+overlays item: the overlay ocamlfind removes the worst offender.
 
-## Validate opam operations against a synced switch
+## Warn when the dune cache cannot hard-link across devices
 
-The round trip proves a synced switch serves locswijch (restore,
-migrate) and day-to-day builds, but no test exercises it *through opam*:
-`opam install <pkg>` into it, `opam list`, `opam remove`. With authentic
-per-package metadata (opam-born switches) this should plausibly work;
-verify against the lts/dream53 references — possibly as a trip
-extension — and record what breaks with stub metadata (ties into the
-faithful-metadata item).
+Found while building the smoke test: with `DUNE_CACHE=enabled`, the
+default storage mode hard-links cache entries, which fails silently when
+the project and `~/.cache/dune` are on different filesystems (e.g.
+project on tmpfs) — the post-restore rebuild then re-runs every package
+build with no error. `DUNE_CACHE_STORAGE_MODE=copy` fixes it. trip (and
+the README's instant-rebuild story) could detect the device mismatch and
+warn or set the storage mode.
+
+## Derive lock.dune repositories from the switch
+
+`Migrate.write_lock_dune` hardcodes
+`https://github.com/ocaml/opam-repository.git`. Read the switch's actual
+repository selections (e.g. pins, custom repos) and emit those instead.
+Niche until a closure with pins or custom repos is attempted.
+
+## Cookie format version guard
+
+README limitation: dune's binary cookie format may change across dune
+versions; stored cookies would then be invalid. Detect the dune version
+(or catch cookie rejection) at restore time and degrade gracefully with a
+clear message instead of a confusing build failure. Speculative until a
+dune release actually changes the format.
