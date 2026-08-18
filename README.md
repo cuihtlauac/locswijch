@@ -189,3 +189,29 @@ threshold that a real package rebuild cannot meet. Requires `opam` and
   opam build commands and dependencies are resolved at `migrate` time
   (the switch's solution is host-specific anyway). The generated
   `dune.lock/` is not portable across operating systems.
+
+## AI disclosure
+
+In the interest of transparency, and in keeping with the transparency
+principles of the EU Artificial Intelligence Act (Regulation (EU) 2024/1689):
+
+- **This repository was developed with substantial assistance from a
+  generative AI system** — Anthropic's Claude, used through the Claude Code
+  agentic coding tool. AI assistance covered source code, tests,
+  documentation, and design discussion. All AI-produced content was reviewed
+  and is maintained under human direction; the maintainer is responsible for
+  the contents of this repository.
+- **locswijch itself is not an AI system.** It contains no machine-learning
+  models and performs no AI inference at runtime. Its output is
+  deterministic: hard-linked file trees and mechanical metadata translation
+  between the dune pkg and opam switch formats. Consequently, locswijch does
+  not fall within the scope of the AI Act's obligations for AI systems, and
+  it produces no "AI-generated content" within the meaning of Article 50.
+- This notice is a **voluntary** provenance disclosure. It is not a claim of
+  formal certification or conformity assessment under the AI Act, which
+  governs AI *systems* placed on the EU market rather than the use of AI as a
+  development aid.
+
+## License
+
+Released under the [MIT License](LICENSE). © 2026 Cuihtlauac Alvarado.
