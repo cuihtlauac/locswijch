@@ -29,6 +29,17 @@ branch (`dune_pkg`):
 4. **Revert scenario**: after a PR revert (back to opam workflows), what
    is the recovery path — restore, or plain opam install with the synced
    switch as cache?
+5. **CI fallback scenario**: if dune pkg fails in GitHub CI or OCaml-CI
+   (e.g. the prebuilt dune install breaks), locswijch as-is cannot help
+   there — sync needs a working dune-pkg build on the same machine, and
+   a synced switch is not relocatable to an ephemeral runner (embedded
+   absolute paths). What would work is a metadata-only subcommand
+   translating the committed `dune.lock/` into a pure-opam pin set
+   (`opam switch export` file or `.opam.locked` style), so CI's
+   secondary path is classic `opam install --deps-only` + `dune build`
+   pinned to exactly the locked versions — no dune pkg, no build
+   artifacts, machine-independent. Assess feasibility and whether it
+   should become its own backlog item.
 
 The answer scopes how urgent the faithful-metadata and opam-operations
 items below are.
