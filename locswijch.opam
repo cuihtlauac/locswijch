@@ -2,11 +2,22 @@ opam-version: "2.0"
 name: "locswijch"
 version: "0.1.0"
 synopsis: "Bidirectional bridge between dune pkg and opam switches"
-maintainer: "Cuihtlauac Alvarado"
+description: """
+dune pkg stores built packages in _build/.pkg/, invisible to the standard
+opam switch mechanism that tools like ocamllsp, merlin, and utop rely on.
+locswijch mirrors those built artifacts into a real opam switch using hard
+links, so editor tooling works unchanged, and the switch doubles as a backup
+of dune.lock/ and _build/.pkg/ that survives dune clean. Subcommands: sync
+(project to switch), restore (switch to project), migrate (opam switch to
+dune.lock/), and trip (end-to-end round-trip test).
+"""
+maintainer: "https://github.com/cuihtlauac"
 authors: "Cuihtlauac Alvarado"
 license: "MIT"
 homepage: "https://github.com/cuihtlauac/locswijch"
 bug-reports: "https://github.com/cuihtlauac/locswijch/issues"
+dev-repo: "git+https://github.com/cuihtlauac/locswijch.git"
+x-maintenance-intent: ["(latest)"]
 depends: [
   "ocaml" {>= "4.14.0"}
   "dune" {>= "3.0"}
