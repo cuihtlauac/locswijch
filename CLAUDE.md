@@ -16,7 +16,9 @@ opam exec -- dune runtest
 
 Two suites: `test/unit/` (sexp_parser + opam_read parsing, incl. the
 disjunction/{post}/depopts/flat-command/%{pkg:installed}% fixes and
-host-side os/arch filter evaluation) and
+host-side os/arch filter evaluation, plus pkg_file against the portable
+`dune pkg lock` format — all_platforms/choice wrappers, +dune overlay
+versions — with fixtures taken verbatim from a real ocaml.org lock) and
 `test/smoke/` (full trip cycle against a generated two-package fixture
 closure in a temp dir — no compiler in the lock, so it uses the ambient
 toolchain; hermetic dune cache via XDG_CACHE_HOME; the post-restore
