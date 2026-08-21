@@ -3,6 +3,20 @@
 Completed backlog items, most recent first. See backlog.md for pending
 work.
 
+## Publish 0.1.0 to opam (2026-08-21)
+
+First opam release. Added the missing opam-repository-required metadata
+(description, dev-repo, x-maintenance-intent, maintainer as GitHub
+handle — no email by choice) and a conventional CHANGES.md alongside
+this session log; lint, build, and both test suites green. Tagged
+v0.1.0, published the GitHub release, and verified the tarball. As
+predicted by the opam-publish skill, the fine-grained PAT let
+opam-publish fork and push `opam-publish-locswijch.0.1.0` but 403'd at
+PR creation; the PR was opened with the classic-scoped gh CLI instead:
+https://github.com/ocaml/opam-repository/pull/30532. Both token copies
+(source file and opam-publish cache) deleted afterwards; PAT revocation
+left to the human. opam-repo-ci results pending on the PR.
+
 ## Can locswijch back up ocaml.org PR 3281? (2026-08-18)
 
 Answer: yes for the on-machine escape hatch, with one missing piece now
