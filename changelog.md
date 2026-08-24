@@ -15,7 +15,10 @@ opam-publish fork and push `opam-publish-locswijch.0.1.0` but 403'd at
 PR creation; the PR was opened with the classic-scoped gh CLI instead:
 https://github.com/ocaml/opam-repository/pull/30532. Both token copies
 (source file and opam-publish cache) deleted afterwards; PAT revocation
-left to the human. opam-repo-ci results pending on the PR.
+left to the human. opam-repo-ci's lower-bounds jobs then failed
+(OpamParserTypes.FullPos is unbound in opam-file-format 2.1.0); fixed by
+raising the bound to 2.1.3, amended into the PR. Merged by jmid on
+2026-08-23; live on opam.ocaml.org.
 
 ## Can locswijch back up ocaml.org PR 3281? (2026-08-18)
 
