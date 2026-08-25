@@ -1,0 +1,34 @@
+{0 locswijch}
+
+Bidirectional bridge between dune pkg and opam switches.
+
+[locswijch] is a command-line tool; it installs no library, so this page is
+the whole of its documentation.
+
+{1 Overview}
+
+[dune pkg] stores built packages in [_build/.pkg/], invisible to the standard
+opam switch mechanism that tools like [ocamllsp], merlin, and utop rely on.
+[locswijch] mirrors those built artifacts into a real opam switch using hard
+links, so editor tooling works unchanged, and the switch doubles as a backup
+of [dune.lock/] and [_build/.pkg/] that survives [dune clean].
+
+{1 Subcommands}
+
+{ul
+ {- [sync] — mirror a project's [_build/.pkg/] into an opam switch.}
+ {- [restore] — rebuild [_build/.pkg/] from a previously synced switch.}
+ {- [migrate] — derive a [dune.lock/] from an existing opam switch.}
+ {- [trip] — end-to-end round-trip test (migrate, build, sync, restore, rebuild).}}
+
+{[
+locswijch sync    --project DIR
+locswijch restore --project DIR
+locswijch migrate --switch NAME --project DIR
+locswijch trip    --switch NAME --project DIR
+]}
+
+{1 More}
+
+See the {{:https://github.com/cuihtlauac/locswijch} project repository} for
+build instructions, design notes, and the test suite.

@@ -1,5 +1,12 @@
 # Changes
 
+## 0.1.1 (2026-08-25)
+
+- Ship a package documentation landing page (`doc/index.mld` via a
+  `documentation` stanza) so `ocaml.org/p/locswijch` renders an overview
+  instead of "No Docs". No API is published — locswijch installs only an
+  executable.
+
 ## 0.1.0 (2026-08-21)
 
 Initial release.
